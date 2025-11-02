@@ -1,13 +1,13 @@
 spring:
   application:
-    name: paymentgateway
+    name: cipherbank
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/paytrix?useSSL=false&serverTimeZone=UTC
+    url: jdbc:mysql://localhost:3306/cipherbank?useSSL=false&serverTimezone=UTC
     username: root
     password: root
   jpa:
-    show-sql: false
+    show-sql: true
     hibernate:
       ddl-auto: update
       naming:
@@ -30,5 +30,5 @@ logging:
     root: INFO
 #    org.springframework.security: DEBUG        # show Spring Security logs
 #    org.springframework.web: DEBUG             # show request mappings and endpoints
-#    org.hibernate.SQL: DEBUG                   # show SQL queries
+    org.hibernate.SQL: DEBUG                   # show SQL queries
 #    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings

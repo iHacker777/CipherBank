@@ -1,0 +1,62 @@
+banks:
+  kgb:
+    parserKey: "kgb"
+    timezone: "Asia/Kolkata"
+
+    xlsx:
+      sheetIndex: "0"
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+      account: { required: false, source: "excelCell", excelCell: { row: 1, col: 1 }, cleanupRegex: "\\D" }
+      headers:
+        mode: "search"
+        search:
+          useOneBasedRowIndex: true
+          fixedHeaderRows: { from: 25, to: 27 }   # headers span rows 25–27 (inclusive)
+          multiRowCount: 3
+          mergeSeparator: " "
+          rowStartOffset: 1                      # data starts one row after row 27
+          expect:
+            date:      ["txn date","transaction date","date"]
+            reference: ["narration","description","particulars"]
+            credit:    ["credit","cr","deposit(cr)","deposit"]
+            debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
+            balance:   ["balance","bal","balance(inr)"]
+      dateParse: { input: "excelSerial" }
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [5,7,12] }
+        orderId: { index: 6, trimNbsp: true }
+        utr: { index: 2, cleanDigitsOnly: true }
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b[0-9A-Z]{12,}\\b" }
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "blankRows" }
+      output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
+
+    xls:
+      sheetIndex: "0"
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+      account: { required: false, source: "excelCell", excelCell: { row: 1, col: 1 }, cleanupRegex: "\\D" }
+      headers:
+        mode: "search"
+        search:
+          useOneBasedRowIndex: true
+          fixedHeaderRows: { from: 15, to: 27 }
+          multiRowCount: 3
+          mergeSeparator: " "
+          rowStartOffset: 1
+          expect:
+            date:      ["txn date","transaction date","date"]
+            reference: ["narration","description","particulars"]
+            credit:    ["credit","cr","deposit(cr)","deposit"]
+            debit:     ["debit","dr","withdrawal(dr)","withdrawal"]
+            balance:   ["balance","bal","balance(inr)"]
+      dateParse: { input: "excelSerial" }
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [5,7,12] }
+        orderId: { index: 6, trimNbsp: true }
+        utr: { index: 2, cleanDigitsOnly: true }
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b[0-9A-Z]{12,}\\b" }
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "blankRows" }
+      output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
