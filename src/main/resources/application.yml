@@ -3,9 +3,9 @@ spring:
     name: cipherbank
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/cipherbank?useSSL=false&serverTimezone=UTC
-    username: root
-    password: root@123
+    url: jdbc:mysql:/paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank
+    username: admin
+    password: password
   jpa:
     show-sql: true
     hibernate:
@@ -28,7 +28,7 @@ jwt:
 logging:
   level:
     root: INFO
-#    org.springframework.security: DEBUG        # show Spring Security logs
-#    org.springframework.web: DEBUG             # show request mappings and endpoints
+    #    org.springframework.security: DEBUG        # show Spring Security logs
+    #    org.springframework.web: DEBUG             # show request mappings and endpoints
     org.hibernate.SQL: DEBUG                   # show SQL queries
 #    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings
