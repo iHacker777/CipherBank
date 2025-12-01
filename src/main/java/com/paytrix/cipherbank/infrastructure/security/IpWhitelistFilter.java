@@ -31,9 +31,9 @@ public class IpWhitelistFilter extends OncePerRequestFilter {
 
         if (!whitelistedIps.contains(clientIp)) {
 
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+//            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
 //            response.setStatus(HttpStatus.FORBIDDEN.value());
-            response.getWriter().write("Access denied: IP not whitelisted");
+            response.getWriter().write("Access denied: IP not whitelisted! **NEW**");
             return;
         }
 
