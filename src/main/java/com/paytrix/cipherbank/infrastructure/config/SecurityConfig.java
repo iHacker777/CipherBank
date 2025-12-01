@@ -48,7 +48,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 );
 
-        http.addFilterBefore(ipWhitelistFilter, UsernamePasswordAuthenticationFilter.class);
+//        http.addFilterBefore(ipWhitelistFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
 //        http.httpBasic(basic -> {}); // optional: enable basic for quick debugging
