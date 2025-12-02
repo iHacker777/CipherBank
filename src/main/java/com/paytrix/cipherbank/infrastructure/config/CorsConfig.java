@@ -1,4 +1,4 @@
-package com.cipherbank.config;
+package com.paytrix.cipherbank.infrastructure.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

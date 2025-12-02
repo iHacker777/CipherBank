@@ -9,7 +9,13 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
+import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
+import com.paytrix.cipherbank.domain.model.ChangePasswordRequest;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.http.HttpStatus;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 record AuthRequest(String username, String password) {}
@@ -21,6 +27,12 @@ public class AuthController {
 
     @Autowired
     private AuthUseCase authService;
+
+    @Autowired
+    private UserRepositoryPort userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody @Valid AuthRequest request) {
@@ -42,5 +54,33 @@ public class AuthController {
         );
 
         return ResponseEntity.ok(response);
+    }
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePassword(
+            @RequestBody @Valid ChangePasswordRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        try {
+            // Get current user
+            String username = userDetails.getUsername();
+            User user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Verify current password
+            if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Current password is incorrect"));
+            }
+
+            // Update password
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            userRepository.save(user);
+
+            return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to change password: " + e.getMessage()));
+        }
     }
 }
