@@ -5,20 +5,25 @@ import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.Role
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.User;
 import com.paytrix.cipherbank.domain.model.UserRegistrationRequest;
 import com.paytrix.cipherbank.domain.model.UserResponse;
+import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
+import com.paytrix.cipherbank.domain.model.ChangePasswordRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-import com.paytrix.cipherbank.application.port.out.UserRepositoryPort;
-import com.paytrix.cipherbank.domain.model.ChangePasswordRequest;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.http.HttpStatus;
+
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-record AuthRequest(String username, String password) {}
+// DTO Records
+record LoginRequest(String username, String password) {}
 record AuthResponse(String token) {}
 
 @RestController
@@ -36,14 +41,18 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        // ... authentication logic ...
+        // Authenticate user and generate token
+        String token = authService.login(request.username(), request.password());
 
-        String token = jwtTokenUtil.generateTokenFromUser(user);
+        // Get user details to extract roles
+        User user = userRepository.findByUsername(request.username())
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
         List<String> roles = user.getRoles().stream()
                 .map(Role::getName)
                 .collect(Collectors.toList());
 
+        // Return token + username + roles
         Map<String, Object> response = new HashMap<>();
         response.put("token", token);
         response.put("username", user.getUsername());
@@ -54,8 +63,11 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<UserResponse> register(@RequestBody @Valid UserRegistrationRequest request) {
-
-        User user = authService.registerUserWithRoleIds(request.getUsername(), request.getPassword(), request.getRoleIds());
+        User user = authService.registerUserWithRoleIds(
+                request.getUsername(),
+                request.getPassword(),
+                request.getRoleIds()
+        );
 
         UserResponse response = new UserResponse(
                 user.getId(),
@@ -65,6 +77,7 @@ public class AuthController {
 
         return ResponseEntity.ok(response);
     }
+
     @GetMapping("/me")
     public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         String username = authentication.getName();
@@ -81,6 +94,7 @@ public class AuthController {
 
         return ResponseEntity.ok(response);
     }
+
     @PostMapping("/change-password")
     public ResponseEntity<?> changePassword(
             @RequestBody @Valid ChangePasswordRequest request,
