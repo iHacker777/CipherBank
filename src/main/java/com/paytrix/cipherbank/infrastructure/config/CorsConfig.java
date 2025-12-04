@@ -22,6 +22,7 @@ public class CorsConfig {
         // Allow these origins
         config.setAllowedOrigins(Arrays.asList(
                 "http://cipher.thepaytrix.com",
+                "https://cipher.thepaytrix.com",
                 "http://43.205.156.91",
                 "http://43.205.156.91:8081",
                 "http://localhost:3000"  // For local development
