@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.paytrix</groupId>
-	<artifactId>paymentgateway</artifactId>
+	<artifactId>cipherbank</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>paymentgateway</name>
-	<description>Paytrix Payment Gateway</description>
+	<name>cipherbank</name>
+	<description>Cipherbank Statement Parser</description>
 	<url/>
 	<licenses>
 		<license/>

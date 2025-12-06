@@ -1,11 +1,15 @@
 spring:
   application:
     name: cipherbank
+
+  # Database Configuration
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: admin
     password: password
+
+  # JPA/Hibernate Configuration
   jpa:
     show-sql: true
     hibernate:
@@ -16,19 +20,33 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
 
+  # ⭐ NEW: File Upload Configuration (IMPORTANT!)
+  servlet:
+    multipart:
+      enabled: true                    # Enable multipart file upload
+      max-file-size: 10MB             # Maximum file size (matches controller validation)
+      max-request-size: 10MB          # Maximum request size
+      file-size-threshold: 0          # Threshold after which files are written to disk
+      location: /tmp                  # Temporary file storage location
+
+# Swagger/OpenAPI Configuration
 springdoc:
   api-docs:
     enabled: true
 
+# JWT Configuration
 jwt:
   secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
   encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
   expiration: 900000  # 15 minutes in milliseconds
 
+# Logging Configuration
 logging:
   level:
     root: INFO
-    #    org.springframework.security: DEBUG        # show Spring Security logs
-    #    org.springframework.web: DEBUG             # show request mappings and endpoints
-    org.hibernate.SQL: DEBUG                   # show SQL queries
-#    org.hibernate.type.descriptor.sql.BasicBinder: TRACE # show SQL parameter bindings
+    # Uncomment for debugging
+    # org.springframework.security: DEBUG        # Show Spring Security logs
+    # org.springframework.web: DEBUG             # Show request mappings
+    org.hibernate.SQL: DEBUG                     # Show SQL queries
+    # org.hibernate.type.descriptor.sql.BasicBinder: TRACE # Show SQL parameters
+    com.paytrix.cipherbank: INFO                 # Application logs
