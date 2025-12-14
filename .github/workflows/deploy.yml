@@ -188,7 +188,7 @@ jobs:
               ATTEMPT=$((ATTEMPT + 1))
               echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
               
-              RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+              RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
               
               if [ "$RESPONSE" = "200" ]; then
                 HEALTH_DATA=$(curl -s "$HEALTH_URL")
