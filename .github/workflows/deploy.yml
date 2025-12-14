@@ -144,7 +144,7 @@ jobs:
           DB_USERNAME=${{ secrets.DB_USERNAME }}
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
           IP_WHITELIST_ENABLED=true
-          IP_WHITELIST_DEBUG=false
+          IP_WHITELIST_DEBUG=true
           EOF
           ENDSSH
       
