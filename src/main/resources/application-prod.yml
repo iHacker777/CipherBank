@@ -16,7 +16,7 @@ spring:
   jpa:
     show-sql: false  # Disable in production
     hibernate:
-      ddl-auto: validate  # Use 'validate' or 'none' in production
+      ddl-auto: update  # Use 'validate' or 'none' in production
       naming:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
     properties:
