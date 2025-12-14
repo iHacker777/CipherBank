@@ -91,15 +91,15 @@ public class IpWhitelistFilter extends OncePerRequestFilter {
         logger.debug("Access granted for IP: {} - Request URI: {}", clientIp, request.getRequestURI());
         filterChain.doFilter(request, response);
     }
-
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // You can add paths that should bypass IP whitelist here
         String path = request.getRequestURI();
 
-        // Example: Skip IP check for health check endpoints
-        // return path.startsWith("/actuator/health") || path.startsWith("/health");
-
-        return false;
+        // Skip IP whitelist for these paths:
+        return path.startsWith("/actuator/health") ||   // Health checks
+                path.startsWith("/actuator") ||          // All actuator endpoints
+                path.startsWith("/swagger-ui") ||        // Swagger UI
+                path.startsWith("/v3/api-docs") ||       // OpenAPI docs
+                path.startsWith("/api/debug");           // Debug endpoints
     }
 }

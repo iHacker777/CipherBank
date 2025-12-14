@@ -11,7 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 public interface JpaIpWhitelistRepository extends JpaRepository<IpWhitelist, Long>, IpWhitelistRepositoryPort {
 
     // Custom query with explicit comparison for MySQL tinyint(1) compatibility
-    @Query("SELECT i FROM IpWhitelist i WHERE i.active = true")
+    @Query("SELECT i FROM IpWhitelist i WHERE i.active = 1")
+
     // Spring JPA automatically maps this to SELECT * FROM ip_whitelist WHERE active = true
     List<IpWhitelist> findAllByActiveTrue();
 
