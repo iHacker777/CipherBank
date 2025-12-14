@@ -5,8 +5,8 @@ spring:
   # Database Configuration
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: admin
+    url: jdbc:mysql://34.180.14.173:3306/cipherbank
+    username: root
     password: password
 
   # JPA/Hibernate Configuration
@@ -20,7 +20,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
 
-  # ⭐ NEW: File Upload Configuration (IMPORTANT!)
+  # NEW: File Upload Configuration (IMPORTANT!)
   servlet:
     multipart:
       enabled: true                    # Enable multipart file upload

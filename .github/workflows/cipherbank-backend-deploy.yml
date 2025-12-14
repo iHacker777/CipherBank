@@ -1,0 +1,358 @@
+name: CipherBank Backend - Blue/Green Deploy
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/cipherbank-backend-deploy.yml'
+  workflow_dispatch:
+
+env:
+  APP_NAME: cipherbank
+  BLUE_PORT: 8082
+  GREEN_PORT: 8083
+  HEALTH_ENDPOINT: /actuator/health
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  SSH_HOST: ${{ secrets.GCP_HOST }}
+  SSH_USER: ${{ secrets.GCP_USER }}
+  SSH_KEY: ${{ secrets.GCP_SSH_KEY }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      # ==================== INITIALIZATION ====================
+      - name: 📦 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 🔧 Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+      
+      - name: 🔑 Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: 📝 Set Build Variables
+        id: vars
+        run: |
+          echo "BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n1)" >> $GITHUB_OUTPUT
+          echo "AUTHOR=$(git log -1 --pretty=format:'%an')" >> $GITHUB_OUTPUT
+      
+      - name: 📢 Notify Deployment Start
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="🚀 <b>CipherBank Backend Deployment Started</b>
+          
+          📊 <b>Build Info</b>
+          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
+          • Author: ${{ steps.vars.outputs.AUTHOR }}
+          • Time: ${{ steps.vars.outputs.BUILD_TIME }}
+          
+          💬 <i>${{ steps.vars.outputs.COMMIT_MSG }}</i>
+          
+          ⏳ Building application..."
+      
+      # ==================== BUILD ====================
+      - name: 🏗️ Build with Maven
+        id: build
+        run: |
+          echo "🔨 Starting Maven build..."
+          mvn clean package -DskipTests -B
+          
+          if [ $? -eq 0 ]; then
+            JAR_FILE=$(find target -name "*.jar" ! -name "*sources.jar" ! -name "*javadoc.jar" | head -1)
+            JAR_SIZE=$(du -h "$JAR_FILE" | cut -f1)
+            echo "jar_file=$JAR_FILE" >> $GITHUB_OUTPUT
+            echo "jar_size=$JAR_SIZE" >> $GITHUB_OUTPUT
+            echo "✅ Build successful: $JAR_FILE ($JAR_SIZE)"
+          else
+            echo "❌ Build failed"
+            exit 1
+          fi
+      
+      - name: 📢 Notify Build Complete
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="✅ Build completed
+          • Size: ${{ steps.build.outputs.jar_size }}
+          • Uploading to server..."
+      
+      # ==================== DETECT ACTIVE COLOR ====================
+      - name: 🎨 Detect Active Color
+        id: detect_color
+        run: |
+          ACTIVE_COLOR=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "if systemctl is-active --quiet ${{ env.APP_NAME }}-blue; then echo 'blue'; else echo 'green'; fi")
+          
+          if [ "$ACTIVE_COLOR" = "blue" ]; then
+            DEPLOY_COLOR="green"
+            DEPLOY_PORT="${{ env.GREEN_PORT }}"
+            ACTIVE_PORT="${{ env.BLUE_PORT }}"
+          else
+            DEPLOY_COLOR="blue"
+            DEPLOY_PORT="${{ env.BLUE_PORT }}"
+            ACTIVE_PORT="${{ env.GREEN_PORT }}"
+          fi
+          
+          echo "active_color=$ACTIVE_COLOR" >> $GITHUB_OUTPUT
+          echo "deploy_color=$DEPLOY_COLOR" >> $GITHUB_OUTPUT
+          echo "deploy_port=$DEPLOY_PORT" >> $GITHUB_OUTPUT
+          echo "active_port=$ACTIVE_PORT" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Active: $ACTIVE_COLOR (port $ACTIVE_PORT)"
+          echo "🎯 Deploying to: $DEPLOY_COLOR (port $DEPLOY_PORT)"
+      
+      # ==================== DEPLOY ====================
+      - name: 📤 Upload JAR to Server
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ steps.build.outputs.jar_file }} \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/claude/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
+      
+      - name: 📤 Upload Environment File
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            cat > /home/claude/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/.env << 'EOF'
+          SERVER_PORT=${{ steps.detect_color.outputs.deploy_port }}
+          SPRING_PROFILES_ACTIVE=prod
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_PORT=${{ secrets.DB_PORT }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USERNAME=${{ secrets.DB_USERNAME }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_ENCRYPTION_SECRET=${{ secrets.JWT_ENCRYPTION_SECRET }}
+          JWT_EXPIRATION=900000
+          IP_WHITELIST_ENABLED=true
+          IP_WHITELIST_DEBUG=false
+          EOF
+          ENDSSH
+      
+      - name: 🔄 Restart Service
+        id: restart
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            set -e
+            
+            echo "🔄 Restarting ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} service..."
+            sudo systemctl restart ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}
+            
+            echo "⏳ Waiting for service to start..."
+            sleep 5
+            
+            if sudo systemctl is-active --quiet ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}; then
+              echo "✅ Service started successfully"
+            else
+              echo "❌ Service failed to start"
+              sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
+              exit 1
+            fi
+          ENDSSH
+      
+      # ==================== HEALTH CHECK ====================
+      - name: 🏥 Health Check
+        id: health
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            set -e
+            
+            MAX_ATTEMPTS=30
+            ATTEMPT=0
+            HEALTH_URL="http://localhost:${{ steps.detect_color.outputs.deploy_port }}${{ env.HEALTH_ENDPOINT }}"
+            
+            echo "🏥 Starting health checks on $HEALTH_URL"
+            
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
+              
+              RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+              
+              if [ "$RESPONSE" = "200" ]; then
+                HEALTH_DATA=$(curl -s "$HEALTH_URL")
+                echo "✅ Health check passed!"
+                echo "Response: $HEALTH_DATA"
+                exit 0
+              fi
+              
+              echo "⏳ Service not ready yet (HTTP $RESPONSE), waiting 2s..."
+              sleep 2
+            done
+            
+            echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
+            echo "📋 Last 50 logs:"
+            sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
+            exit 1
+          ENDSSH
+      
+      - name: 📢 Notify Health Check Success
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="✅ Health check passed
+          • Color: ${{ steps.detect_color.outputs.deploy_color }}
+          • Port: ${{ steps.detect_color.outputs.deploy_port }}
+          • Switching traffic..."
+      
+      # ==================== TRAFFIC SWITCH ====================
+      - name: 🔀 Switch Traffic
+        id: switch
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            set -e
+            
+            # Update nginx upstream configuration
+            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
+            
+            # Create backup
+            sudo cp "$PROXY_CONF" "${PROXY_CONF}.backup"
+            
+            # Update port in proxy config
+            sudo sed -i 's/proxy_pass http:\/\/127\.0\.0\.1:[0-9]\+/proxy_pass http:\/\/127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}/g' "$PROXY_CONF"
+            
+            # Test nginx config
+            if sudo nginx -t 2>&1; then
+              echo "✅ Nginx config valid"
+              sudo nginx -s reload
+              echo "✅ Nginx reloaded"
+            else
+              echo "❌ Nginx config invalid, restoring backup"
+              sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
+              sudo nginx -s reload
+              exit 1
+            fi
+          ENDSSH
+      
+      - name: 🧪 Verify Traffic Switch
+        run: |
+          sleep 3
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://cipher.thepaytrix.com${{ env.HEALTH_ENDPOINT }} || echo "000")
+          
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Traffic successfully switched to ${{ steps.detect_color.outputs.deploy_color }}"
+          else
+            echo "❌ Traffic switch verification failed (HTTP $RESPONSE)"
+            exit 1
+          fi
+      
+      # ==================== CLEANUP OLD VERSION ====================
+      - name: 🧹 Stop Old Version
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            echo "🛑 Stopping ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }} service..."
+            sudo systemctl stop ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }} || true
+            echo "✅ Old version stopped"
+          ENDSSH
+      
+      # ==================== SUCCESS NOTIFICATION ====================
+      - name: 📢 Notify Deployment Success
+        if: success()
+        run: |
+          DEPLOY_TIME=$(date +'%Y-%m-%d %H:%M:%S UTC')
+          
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="✅ <b>CipherBank Backend Deployment Successful</b>
+          
+          🎯 <b>Deployment Details</b>
+          • Color: ${{ steps.detect_color.outputs.active_color }} → <b>${{ steps.detect_color.outputs.deploy_color }}</b>
+          • Port: ${{ steps.detect_color.outputs.active_port }} → <b>${{ steps.detect_color.outputs.deploy_port }}</b>
+          • Size: ${{ steps.build.outputs.jar_size }}
+          
+          📊 <b>Build Info</b>
+          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
+          • Author: ${{ steps.vars.outputs.AUTHOR }}
+          • Built: ${{ steps.vars.outputs.BUILD_TIME }}
+          • Deployed: $DEPLOY_TIME
+          
+          🌐 <b>Endpoints</b>
+          • API: https://cipher.thepaytrix.com/api
+          • Health: https://cipher.thepaytrix.com${{ env.HEALTH_ENDPOINT }}
+          
+          💬 <i>${{ steps.vars.outputs.COMMIT_MSG }}</i>"
+      
+      # ==================== FAILURE HANDLING ====================
+      - name: 🚨 Rollback on Failure
+        if: failure() && steps.switch.outcome == 'failure'
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            echo "🚨 Deployment failed, initiating rollback..."
+            
+            # Stop failed deployment
+            sudo systemctl stop ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} || true
+            
+            # Restore nginx config from backup if it exists
+            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
+            if [ -f "${PROXY_CONF}.backup" ]; then
+              sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
+              sudo nginx -s reload
+              echo "✅ Nginx config restored"
+            fi
+            
+            # Ensure old version is running
+            sudo systemctl start ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }}
+            
+            echo "✅ Rollback complete, service restored to ${{ steps.detect_color.outputs.active_color }}"
+          ENDSSH
+      
+      - name: 📢 Notify Deployment Failure
+        if: failure()
+        run: |
+          # Get error context
+          FAILED_STEP="${{ job.status }}"
+          ERROR_LOG=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 20 --no-pager" || echo "Could not retrieve logs")
+          
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="❌ <b>CipherBank Backend Deployment Failed</b>
+          
+          🚨 <b>Failure Details</b>
+          • Failed Step: ${{ steps.detect_color.outcome == 'failure' && 'Color Detection' || steps.build.outcome == 'failure' && 'Build' || steps.restart.outcome == 'failure' && 'Service Restart' || steps.health.outcome == 'failure' && 'Health Check' || steps.switch.outcome == 'failure' && 'Traffic Switch' || 'Unknown' }}
+          • Target: ${{ steps.detect_color.outputs.deploy_color }} (port ${{ steps.detect_color.outputs.deploy_port }})
+          
+          📊 <b>Build Info</b>
+          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
+          • Author: ${{ steps.vars.outputs.AUTHOR }}
+          
+          🔄 <b>Status</b>
+          • Rollback: Initiated
+          • Active: ${{ steps.detect_color.outputs.active_color }} (unchanged)
+          
+          📋 <b>Recent Logs</b>
+          <code>${ERROR_LOG:0:500}</code>
+          
+          🔗 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View Full Logs</a>"
