@@ -13,7 +13,7 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: root
       password: password
       hikari:
