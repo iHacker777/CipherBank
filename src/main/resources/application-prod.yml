@@ -4,7 +4,8 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     # Update with your RDS or EC2 MySQL endpoint
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cipherbank}?useSSL=true&serverTimezone=UTC
+    url: jdbc:mysql://34.180.14.173:3306/cipherbank
+    #url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cipherbank}?useSSL=true&serverTimezone=UTC
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:password}
     hikari:
