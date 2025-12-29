@@ -103,8 +103,30 @@ jobs:
         id: detect_color
         run: |
           ACTIVE_COLOR=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
-            "if systemctl is-active --quiet ${{ env.APP_NAME }}-blue; then echo 'blue'; else echo 'green'; fi")
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'DETECT_SCRIPT'
+          
+            BLUE_ACTIVE=$(systemctl is-active --quiet ${{ env.APP_NAME }}-blue && echo "1" || echo "0")
+            GREEN_ACTIVE=$(systemctl is-active --quiet ${{ env.APP_NAME }}-green && echo "1" || echo "0")
+          
+            if [ "$BLUE_ACTIVE" = "1" ] && [ "$GREEN_ACTIVE" = "0" ]; then
+              echo "blue"
+            elif [ "$GREEN_ACTIVE" = "1" ] && [ "$BLUE_ACTIVE" = "0" ]; then
+              echo "green"
+            elif [ "$BLUE_ACTIVE" = "0" ] && [ "$GREEN_ACTIVE" = "0" ]; then
+              # Both stopped - check nginx config to see which was last active
+              CURRENT_PORT=$(sudo grep -oP 'proxy_pass http://127\.0\.0\.1:\K[0-9]+' \
+                /www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf | head -1)
+              if [ "$CURRENT_PORT" = "${{ env.BLUE_PORT }}" ]; then
+                echo "blue"
+              else
+                echo "green"
+              fi
+            else
+              # Both running - this shouldn't happen, default to blue
+              echo "blue"
+            fi
+          DETECT_SCRIPT
+          )
           
           if [ "$ACTIVE_COLOR" = "blue" ]; then
             DEPLOY_COLOR="green"
@@ -134,6 +156,7 @@ jobs:
           echo "✅ JAR uploaded successfully"
       
       - name: 🔄 Restart Service
+        id: restart
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
@@ -274,6 +297,16 @@ jobs:
             echo "✅ Old version stopped"
           ENDSSH
       
+      - name: 🧹 Cleanup Backup Files
+        if: success()
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
+            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
+            sudo rm -f "${PROXY_CONF}.backup"
+            echo "✅ Backup config cleaned"
+          ENDSSH
+      
       # ==================== SUCCESS NOTIFICATION ====================
       - name: 📢 Notify Deployment Success
         if: success()
@@ -304,7 +337,7 @@ jobs:
       
       # ==================== FAILURE HANDLING ====================
       - name: 🚨 Rollback on Failure
-        if: failure() && steps.switch.outcome == 'failure'
+        if: failure() && (steps.health.outcome == 'failure' || steps.switch.outcome == 'failure')
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
@@ -330,8 +363,20 @@ jobs:
       - name: 📢 Notify Deployment Failure
         if: failure()
         run: |
-          # Get error context
-          FAILED_STEP="${{ job.status }}"
+          # Determine failed step
+          FAILED_STEP="Unknown"
+          if [ "${{ steps.detect_color.outcome }}" = "failure" ]; then
+            FAILED_STEP="Color Detection"
+          elif [ "${{ steps.build.outcome }}" = "failure" ]; then
+            FAILED_STEP="Build"
+          elif [ "${{ steps.restart.outcome }}" = "failure" ]; then
+            FAILED_STEP="Service Restart"
+          elif [ "${{ steps.health.outcome }}" = "failure" ]; then
+            FAILED_STEP="Health Check"
+          elif [ "${{ steps.switch.outcome }}" = "failure" ]; then
+            FAILED_STEP="Traffic Switch"
+          fi
+          
           ERROR_LOG=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
             "sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 20 --no-pager" || echo "Could not retrieve logs")
@@ -342,11 +387,11 @@ jobs:
             -d text="❌ <b>CipherBank Backend Deployment Failed</b>
           
           🚨 <b>Failure Details</b>
-          • Failed Step: ${{ steps.detect_color.outcome == 'failure' && 'Color Detection' || steps.build.outcome == 'failure' && 'Build' || steps.restart.outcome == 'failure' && 'Service Restart' || steps.health.outcome == 'failure' && 'Health Check' || steps.switch.outcome == 'failure' && 'Traffic Switch' || 'Unknown' }}
+          • Failed Step: $FAILED_STEP
           • Target: ${{ steps.detect_color.outputs.deploy_color }} (port ${{ steps.detect_color.outputs.deploy_port }})
           
           📊 <b>Build Info</b>
-          • Commit:  <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
+          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
           • Author: ${{ steps.vars.outputs.AUTHOR }}
           
           🔄 <b>Status</b>
