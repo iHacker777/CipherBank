@@ -120,7 +120,7 @@ jwt:
 # IP Whitelist Security Configuration
 security:
   ip-whitelist:
-    enabled: true      # Set to false to disable IP whitelist filtering
+    enabled: false      # Set to false to disable IP whitelist filtering
     debug: false       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
 
 # ============================================================================
