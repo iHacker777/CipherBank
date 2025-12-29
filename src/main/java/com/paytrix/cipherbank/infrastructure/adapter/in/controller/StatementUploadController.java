@@ -123,6 +123,9 @@ public class StatementUploadController {
                     accountNo
             );
 
+            log.info("cmd = {}", cmd);
+            log.info("fileData = {}", file.getInputStream());
+
             log.info("Processing upload...");
             var result = useCase.upload(cmd);
 
