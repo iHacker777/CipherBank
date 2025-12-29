@@ -58,7 +58,9 @@ public class StatementUploadService implements StatementUploadUseCase {
         String accountNo = cmd.accountNoOverride(); // optional override
 
         try {
+            log.info("TRY BLOCK");
             var bankCfg = configLoader.getBankConfig(cmd.parserKey());
+            log.info("BankConfig = {}", bankCfg);
             var rows = ParserEngine.parse(cmd.inputStream(), cmd.originalFilename(), cmd.contentType(), bankCfg, accountNo);
             parsed = rows.size();
 
