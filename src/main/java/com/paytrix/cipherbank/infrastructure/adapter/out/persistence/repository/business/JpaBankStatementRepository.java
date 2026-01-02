@@ -2,28 +2,49 @@ package com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository
 
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankStatement;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.List;
 
-public interface JpaBankStatementRepository extends JpaRepository<BankStatement, Long> {
+/**
+ * JPA Repository for BankStatement entity
+ *
+ * Extends JpaSpecificationExecutor for advanced search with dynamic criteria
+ *
+ * Contains methods for:
+ * - Deduplication checks
+ * - Payment verification queries
+ * - Advanced search (via JpaSpecificationExecutor)
+ */
+public interface JpaBankStatementRepository extends JpaRepository<BankStatement, Long>,
+        JpaSpecificationExecutor<BankStatement> {
+
+    // ============================================================
+    // DEDUPLICATION - Used during statement upload
+    // ============================================================
 
     /**
      * DEPRECATED: Use existsByAccountNoAndUtr instead
-     * @deprecated Checks wrong constraint - use existsByAccountNoAndUtr
+     * This checks a constraint that doesn't exist in database
+     * @deprecated Use existsByAccountNoAndUtr which matches actual DB constraint
      */
     @Deprecated
     boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
 
     /**
      * Check if statement exists with same account number and UTR
-     * Matches database constraint uk_stmt_acct_utr (account_no, utr)
+     * Matches database constraint: uk_stmt_acct_utr (account_no, utr)
      * THIS IS THE CORRECT METHOD FOR DEDUPLICATION
      *
      * @param accountNo Account number
      * @param utr Unique Transaction Reference
-     * @return true if exists, false otherwise
+     * @return true if duplicate exists, false otherwise
      */
     boolean existsByAccountNoAndUtr(Long accountNo, String utr);
+
+    // ============================================================
+    // PAYMENT VERIFICATION - Used by payment verification endpoint
+    // ============================================================
 
     /**
      * Find ALL unprocessed statements matching orderId and utr (PRIORITY 1)
@@ -58,4 +79,11 @@ public interface JpaBankStatementRepository extends JpaRepository<BankStatement,
      * @return List of unprocessed matching statements
      */
     List<BankStatement> findByUtrAndProcessed(String utr, boolean processed);
+
+    // ============================================================
+    // ADVANCED SEARCH
+    // ============================================================
+
+    // No custom methods needed - using JpaSpecificationExecutor.findAll(Specification, Pageable)
+    // This provides dynamic querying with complex criteria through BankStatementSpecification
 }

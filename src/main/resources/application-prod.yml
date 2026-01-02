@@ -13,7 +13,7 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?useSSL=true&serverTimezone=Asia/Kolkata
+      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: root
       password: password
       hikari:
@@ -115,13 +115,35 @@ springdoc:
 jwt:
   secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
   encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
-  expiration: 900000  # in milliseconds
+  expiration: 900000  # 15 minutes in milliseconds
 
-# IP Whitelist Security Configuration
+# ============================================================================
+# IP WHITELIST SECURITY CONFIGURATION
+# ============================================================================
 security:
   ip-whitelist:
-    enabled: false      # Set to false to disable IP whitelist filtering
-    debug: false       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
+    enabled: true      # Set to false to disable IP whitelist filtering
+    debug: true       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
+
+# ============================================================================
+# STATEMENT QUERY CONFIGURATION
+# ============================================================================
+statement:
+  query:
+    # Maximum number of records per page (prevents excessive data retrieval)
+    max-page-size: 100
+
+    # Default page size when not specified in request
+    default-page-size: 20
+
+    # Default column to sort by when not specified
+    # Should be a valid BankStatement entity field name
+    # Common values: transactionDateTime, uploadTimestamp, amount, accountNo
+    default-sort-column: transactionDateTime
+
+    # Default sort direction when not specified
+    # Values: asc (ascending) or desc (descending)
+    default-sort-direction: desc
 
 # ============================================================================
 # LOGGING CONFIGURATION

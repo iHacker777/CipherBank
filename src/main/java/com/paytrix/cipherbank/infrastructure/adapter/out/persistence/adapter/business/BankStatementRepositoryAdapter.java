@@ -1,17 +1,28 @@
 package com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business;
 
 import com.paytrix.cipherbank.application.port.out.business.BankStatementRepositoryPort;
+import com.paytrix.cipherbank.domain.model.StatementSearchRequest;
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankStatement;
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business.JpaBankStatementRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
+import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.specification.BankStatementSpecification;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Adapter implementing BankStatementRepositoryPort using JPA
+ *
+ * Handles:
+ * - Statement upload with deduplication
+ * - Payment verification queries
+ * - Advanced search with complex filters
+ */
 @Component
 public class BankStatementRepositoryAdapter implements BankStatementRepositoryPort {
 
@@ -19,53 +30,43 @@ public class BankStatementRepositoryAdapter implements BankStatementRepositoryPo
 
     private final JpaBankStatementRepository jpa;
 
-    @PersistenceContext(unitName = "businessEntityManagerFactory")
-    private EntityManager entityManager;
-
     public BankStatementRepositoryAdapter(JpaBankStatementRepository jpa) {
         this.jpa = jpa;
     }
+
+    // ============================================================
+    // STATEMENT UPLOAD & DEDUPLICATION
+    // ============================================================
 
     @Override
     public BankStatement save(BankStatement stmt) {
         try {
             return jpa.saveAndFlush(stmt);
         } catch (DataIntegrityViolationException dup) {
-            log.debug("Duplicate detected during save - UTR={}, OrderID={}, AccountNo={}. " +
-                            "Entity will be detached from session.",
-                    stmt.getUtr(), stmt.getOrderId(), stmt.getAccountNo());
-
-            // CRITICAL FIX: Detach failed entity from Hibernate session
-            // This prevents "null identifier" errors on subsequent operations
-            if (entityManager != null && entityManager.contains(stmt)) {
-                entityManager.detach(stmt);
-                log.debug("Successfully detached failed entity from Hibernate session");
-            }
-
-            // Return null to indicate duplicate (caller counts as deduped)
+            // Likely unique key violation (dedupe). Caller can count it as deduped.
+            log.debug("Duplicate statement detected during save (constraint violation)");
             return null;
-        } catch (Exception ex) {
-            // Also detach on other exceptions to keep session clean
-            if (entityManager != null && entityManager.contains(stmt)) {
-                entityManager.detach(stmt);
-                log.warn("Detached entity after exception: {}", ex.getMessage());
-            }
-            throw ex;
         }
     }
 
     @Override
     @Deprecated
     public boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo) {
-        log.warn("DEPRECATED METHOD CALLED: existsByUtrAndOrderIdAndAccountNo() - Use existsByAccountNoAndUtr() instead");
+        // DEPRECATED: This checks a constraint that may not exist in database
+        // Use existsByAccountNoAndUtr instead
+        log.warn("DEPRECATED METHOD CALLED: existsByUtrAndOrderIdAndAccountNo - use existsByAccountNoAndUtr instead");
         return jpa.existsByUtrAndOrderIdAndAccountNo(utr, orderId, accountNo);
     }
 
     @Override
     public boolean existsByAccountNoAndUtr(Long accountNo, String utr) {
-        // This is the CORRECT method - matches constraint uk_stmt_acct_utr
+        // THIS IS THE CORRECT METHOD - matches database constraint uk_stmt_acct_utr
         return jpa.existsByAccountNoAndUtr(accountNo, utr);
     }
+
+    // ============================================================
+    // PAYMENT VERIFICATION
+    // ============================================================
 
     @Override
     public List<BankStatement> findUnprocessedByOrderIdAndUtr(String orderId, String utr) {
@@ -83,5 +84,45 @@ public class BankStatementRepositoryAdapter implements BankStatementRepositoryPo
     public List<BankStatement> findUnprocessedByUtr(String utr) {
         // Only find records where processed = false (0)
         return jpa.findByUtrAndProcessed(utr, false);
+    }
+
+    // ============================================================
+    // ADVANCED SEARCH
+    // ============================================================
+
+    @Override
+    public Page<BankStatement> searchStatements(StatementSearchRequest searchRequest, Pageable pageable) {
+        log.debug("Executing advanced search - Filters: bankNames={}, accountNos={}, approvalStatuses={}, " +
+                        "gatewayTxnIds={}, orderIds={}, processed={}, txnDateRange={}, utrs={}, " +
+                        "uploadTsRange={}, amountRange={}, usernames={}",
+                countItems(searchRequest.getBankNames()),
+                countItems(searchRequest.getAccountNos()),
+                countItems(searchRequest.getApprovalStatuses()),
+                countItems(searchRequest.getGatewayTransactionIds()),
+                countItems(searchRequest.getOrderIds()),
+                searchRequest.getProcessed(),
+                searchRequest.getTransactionDateTimeRange() != null ? "YES" : "NO",
+                countItems(searchRequest.getUtrs()),
+                searchRequest.getUploadTimestampRange() != null ? "YES" : "NO",
+                searchRequest.getAmountRange() != null ? "YES" : "NO",
+                countItems(searchRequest.getUsernames()));
+
+        // Build JPA Specification from search request
+        Specification<BankStatement> spec = BankStatementSpecification.buildSpecification(searchRequest);
+
+        // Execute query with specification and pagination
+        Page<BankStatement> page = jpa.findAll(spec, pageable);
+
+        log.debug("Search query returned {} results out of {} total",
+                page.getNumberOfElements(), page.getTotalElements());
+
+        return page;
+    }
+
+    /**
+     * Count items in list (for logging)
+     */
+    private int countItems(List<?> list) {
+        return list != null ? list.size() : 0;
     }
 }

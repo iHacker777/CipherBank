@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -44,15 +45,6 @@ public class StatementUploadController {
     }
 
     /**
-     * Test endpoint to verify service is running
-     */
-    @GetMapping("/test")
-    public ResponseEntity<String> test() {
-        log.info("Test endpoint called");
-        return ResponseEntity.ok("Statement upload service is running!");
-    }
-
-    /**
      * Upload bank statement file
      *
      * AUTHENTICATION: Required (from SecurityConfig)
@@ -64,6 +56,8 @@ public class StatementUploadController {
      * @param file The statement file (CSV, XLS, XLSX, or PDF)
      * @return Upload result with statistics
      */
+
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<StatementUploadUseCase.UploadResult> upload(
             @RequestParam("parserKey") @NotBlank String parserKey,
@@ -122,9 +116,6 @@ public class StatementUploadController {
                     file.getInputStream(),
                     accountNo
             );
-
-            log.info("cmd = {}", cmd);
-            log.info("fileData = {}", file.getInputStream());
 
             log.info("Processing upload...");
             var result = useCase.upload(cmd);
