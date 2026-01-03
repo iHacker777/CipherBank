@@ -7,44 +7,37 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import java.util.List;
 
 /**
- * JPA Repository for BankStatement entity
- *
- * Extends JpaSpecificationExecutor for advanced search with dynamic criteria
- *
- * Contains methods for:
- * - Deduplication checks
- * - Payment verification queries
- * - Advanced search (via JpaSpecificationExecutor)
+ * JPA Repository for bank statements
+ * Extends JpaSpecificationExecutor for dynamic query support
  */
 public interface JpaBankStatementRepository extends JpaRepository<BankStatement, Long>,
         JpaSpecificationExecutor<BankStatement> {
 
-    // ============================================================
-    // DEDUPLICATION - Used during statement upload
-    // ============================================================
-
     /**
-     * DEPRECATED: Use existsByAccountNoAndUtr instead
-     * This checks a constraint that doesn't exist in database
-     * @deprecated Use existsByAccountNoAndUtr which matches actual DB constraint
-     */
-    @Deprecated
-    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
-
-    /**
-     * Check if statement exists with same account number and UTR
-     * Matches database constraint: uk_stmt_acct_utr (account_no, utr)
-     * THIS IS THE CORRECT METHOD FOR DEDUPLICATION
+     * Check if a statement already exists with the given Account Number and UTR
+     * This matches the ACTUAL database constraint: uk_stmt_acct_utr on (account_no, utr)
      *
-     * @param accountNo Account number
+     * Business Rule: One UTR should only appear once per account, regardless of order_id
+     *
+     * @param accountNo Account Number
      * @param utr Unique Transaction Reference
-     * @return true if duplicate exists, false otherwise
+     * @return true if a matching record exists, false otherwise
      */
     boolean existsByAccountNoAndUtr(Long accountNo, String utr);
 
-    // ============================================================
-    // PAYMENT VERIFICATION - Used by payment verification endpoint
-    // ============================================================
+    /**
+     * @deprecated This method checks 3 columns but database constraint only enforces 2 columns
+     * Use existsByAccountNoAndUtr() instead
+     *
+     * Check if a statement already exists with the given UTR, Order ID, and Account Number
+     *
+     * @param utr Unique Transaction Reference
+     * @param orderId Order/Transaction ID
+     * @param accountNo Account Number
+     * @return true if a matching record exists, false otherwise
+     */
+    @Deprecated
+    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
 
     /**
      * Find ALL unprocessed statements matching orderId and utr (PRIORITY 1)
@@ -79,11 +72,4 @@ public interface JpaBankStatementRepository extends JpaRepository<BankStatement,
      * @return List of unprocessed matching statements
      */
     List<BankStatement> findByUtrAndProcessed(String utr, boolean processed);
-
-    // ============================================================
-    // ADVANCED SEARCH
-    // ============================================================
-
-    // No custom methods needed - using JpaSpecificationExecutor.findAll(Specification, Pageable)
-    // This provides dynamic querying with complex criteria through BankStatementSpecification
 }

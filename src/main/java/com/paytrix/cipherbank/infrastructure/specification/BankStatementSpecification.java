@@ -1,4 +1,4 @@
-package com.paytrix.cipherbank.infrastructure.adapter.out.persistence.specification;
+package com.paytrix.cipherbank.infrastructure.specification;
 
 import com.paytrix.cipherbank.domain.model.StatementSearchRequest;
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.ApprovalStatus;

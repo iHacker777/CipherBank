@@ -7,23 +7,23 @@ import com.paytrix.cipherbank.domain.model.PagedStatementResponse;
 import com.paytrix.cipherbank.domain.model.StatementSearchRequest;
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankStatement;
 import com.paytrix.cipherbank.infrastructure.config.StatementQueryConfigProperties;
+import com.paytrix.cipherbank.infrastructure.specification.BankStatementSpecification;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
- * Service for querying bank statements with advanced search
- * All queries go through searchStatements which supports empty filters (returns all)
- *
- * Configuration values (max page size, default sort, etc.) are loaded from application.yml
+ * Service for querying bank statements with advanced filters and role-based visibility
+ * Applies role-based column filtering before returning results to users
  */
 @Service
 public class StatementQueryService implements StatementQueryUseCase {
@@ -32,12 +32,15 @@ public class StatementQueryService implements StatementQueryUseCase {
 
     private final BankStatementRepositoryPort statementRepository;
     private final StatementQueryConfigProperties config;
+    private final StatementResponseFilterService filterService;
 
     public StatementQueryService(
             BankStatementRepositoryPort statementRepository,
-            StatementQueryConfigProperties config) {
+            StatementQueryConfigProperties config,
+            StatementResponseFilterService filterService) {
         this.statementRepository = statementRepository;
         this.config = config;
+        this.filterService = filterService;
 
         log.info("StatementQueryService initialized with config: maxPageSize={}, defaultPageSize={}, " +
                         "defaultSortColumn={}, defaultSortDirection={}",
@@ -47,112 +50,44 @@ public class StatementQueryService implements StatementQueryUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PagedStatementResponse searchStatements(StatementSearchRequest searchRequest) {
-        log.info("Advanced search request - Filters: bankNames={}, accountNos={}, approvalStatuses={}, " +
-                        "gatewayTxnIds={}, orderIds={}, processed={}, txnDateRange={}, utrs={}, " +
-                        "uploadTsRange={}, amountRange={}, usernames={} - Page: {}, Size: {}",
-                countItems(searchRequest.getBankNames()),
-                countItems(searchRequest.getAccountNos()),
-                countItems(searchRequest.getApprovalStatuses()),
-                countItems(searchRequest.getGatewayTransactionIds()),
-                countItems(searchRequest.getOrderIds()),
-                searchRequest.getProcessed(),
-                searchRequest.getTransactionDateTimeRange() != null ? "YES" : "NO",
-                countItems(searchRequest.getUtrs()),
-                searchRequest.getUploadTimestampRange() != null ? "YES" : "NO",
-                searchRequest.getAmountRange() != null ? "YES" : "NO",
-                countItems(searchRequest.getUsernames()),
-                searchRequest.getPage(),
-                searchRequest.getSize());
+    public PagedStatementResponse searchStatements(StatementSearchRequest request, String userRole) {
+        log.info("Executing advanced search for role: {}", userRole);
 
-        // Validate and build pageable
-        Pageable pageable = buildPageable(searchRequest);
+        // Build specification from search criteria
+        Specification<BankStatement> spec = BankStatementSpecification.buildSpecification(request);
 
-        // Execute search
-        Page<BankStatement> page = statementRepository.searchStatements(searchRequest, pageable);
+        // Build pageable with pagination and sorting
+        Pageable pageable = buildPageable(request);
 
-        log.info("Search returned {} of {} total records",
-                page.getNumberOfElements(), page.getTotalElements());
+        // Execute query
+        Page<BankStatement> page = statementRepository.findAll(spec, pageable);
 
-        return buildPagedResponse(page, pageable);
-    }
+        log.info("Query returned {} records out of {} total (page {}/{})",
+                page.getNumberOfElements(),
+                page.getTotalElements(),
+                page.getNumber() + 1,
+                page.getTotalPages());
 
-    /**
-     * Build Pageable from search request using configuration values
-     */
-    private Pageable buildPageable(StatementSearchRequest request) {
-        // Use defaults from config if not provided
-        int page = request.getPage() != null ? request.getPage() : 0;
-        int size = request.getSize() != null ? request.getSize() : config.getDefaultPageSize();
-
-        // Cap at max from config
-        size = Math.min(size, config.getMaxPageSize());
-
-        if (request.getSize() != null && request.getSize() > config.getMaxPageSize()) {
-            log.warn("Requested page size {} exceeds maximum {}, capping to maximum",
-                    request.getSize(), config.getMaxPageSize());
-        }
-
-        // Build sort
-        Sort sort = buildSort(request.getSort());
-
-        log.debug("Built pageable - page: {}, size: {}, sort: {}", page, size, sort);
-
-        return PageRequest.of(page, size, sort);
-    }
-
-    /**
-     * Build Sort from list of sort strings, using configuration defaults if not provided
-     */
-    private Sort buildSort(List<String> sortList) {
-        if (sortList == null || sortList.isEmpty()) {
-            // Use default from config
-            log.debug("No sort specified, using default: {},{}",
-                    config.getDefaultSortColumn(), config.getDefaultSortDirection());
-
-            Sort.Direction direction = "asc".equalsIgnoreCase(config.getDefaultSortDirection())
-                    ? Sort.Direction.ASC
-                    : Sort.Direction.DESC;
-
-            return Sort.by(direction, config.getDefaultSortColumn());
-        }
-
-        Sort sort = Sort.unsorted();
-        for (String sortParam : sortList) {
-            String[] parts = sortParam.split(",");
-            String column = parts[0].trim();
-            String direction = parts.length > 1 ? parts[1].trim() : config.getDefaultSortDirection();
-
-            Sort.Direction sortDirection = "asc".equalsIgnoreCase(direction)
-                    ? Sort.Direction.ASC
-                    : Sort.Direction.DESC;
-
-            sort = sort.and(Sort.by(sortDirection, column));
-        }
-
-        return sort;
-    }
-
-    /**
-     * Convert Page<BankStatement> to PagedStatementResponse
-     */
-    private PagedStatementResponse buildPagedResponse(Page<BankStatement> page, Pageable pageable) {
-        // Convert entities to DTOs
-        List<BankStatementResponse> statements = page.getContent().stream()
+        // Convert entities to response DTOs
+        List<BankStatementResponse> responses = page.getContent().stream()
                 .map(this::toResponse)
-                .collect(Collectors.toList());
+                .toList();
 
-        // Build sort string for response
-        String sortString = pageable.getSort().toString();
-        if (sortString.equals("UNSORTED")) {
-            sortString = null;
-        }
+        // Apply role-based column filtering
+        List<BankStatementResponse> filteredResponses = filterService.filterResponses(responses, userRole);
 
-        log.debug("Returning {} statements out of {} total (Page {}/{})",
-                statements.size(), page.getTotalElements(),
-                page.getNumber() + 1, page.getTotalPages());
+        // Get visible columns for this role
+        List<String> visibleColumns = filterService.getVisibleColumns(userRole);
 
+        log.info("Filtered {} statements for role '{}', visible columns: {}",
+                filteredResponses.size(), userRole, visibleColumns.size());
+
+        // Build paginated response with role information
         return PagedStatementResponse.builder()
+                // Role & Visibility Information
+                .userRole(userRole)
+                .visibleColumns(visibleColumns)
+                // Pagination Metadata
                 .pageNo(page.getNumber())
                 .pageSize(page.getSize())
                 .totalRecords(page.getTotalElements())
@@ -161,44 +96,127 @@ public class StatementQueryService implements StatementQueryUseCase {
                 .last(page.isLast())
                 .hasNext(page.hasNext())
                 .hasPrevious(page.hasPrevious())
-                .sort(sortString)
-                .statements(statements)
+                .sort(buildSortString(page.getSort()))
+                // Data (filtered)
+                .statements(filteredResponses)
                 .build();
     }
 
     /**
-     * Convert BankStatement entity to BankStatementResponse DTO
+     * Build Pageable with pagination and sorting
+     * Parses sort field in format ["column,direction", "column2,direction2"]
      */
-    private BankStatementResponse toResponse(BankStatement statement) {
+    private Pageable buildPageable(StatementSearchRequest request) {
+        // Page number (default 0)
+        int page = request.getPage() != null ? request.getPage() : 0;
+
+        // Page size (default from config, capped at max)
+        int size = request.getSize() != null ? request.getSize() : config.getDefaultPageSize();
+        if (size > config.getMaxPageSize()) {
+            log.warn("Requested page size {} exceeds maximum {}, capping to maximum",
+                    size, config.getMaxPageSize());
+            size = config.getMaxPageSize();
+        }
+
+        // Build Sort from sort field
+        Sort sort = buildSort(request);
+
+        return PageRequest.of(page, size, sort);
+    }
+
+    /**
+     * Build Sort object from request.sort field
+     * Format: ["column,direction", "column2,direction2"]
+     * Example: ["transactionDateTime,desc", "amount,asc"]
+     *
+     * If sort is null or empty, uses default from config
+     */
+    private Sort buildSort(StatementSearchRequest request) {
+        List<String> sortList = request.getSort();
+
+        // If no sort specified, use default from config
+        if (sortList == null || sortList.isEmpty()) {
+            String defaultColumn = config.getDefaultSortColumn();
+            String defaultDirection = config.getDefaultSortDirection();
+
+            return "asc".equalsIgnoreCase(defaultDirection)
+                    ? Sort.by(defaultColumn).ascending()
+                    : Sort.by(defaultColumn).descending();
+        }
+
+        // Parse sort list
+        List<Sort.Order> orders = new ArrayList<>();
+
+        for (String sortStr : sortList) {
+            if (sortStr == null || sortStr.isBlank()) {
+                continue;
+            }
+
+            // Parse "column,direction" format
+            String[] parts = sortStr.split(",");
+            String column = parts[0].trim();
+            String direction = parts.length > 1 ? parts[1].trim() : "asc";
+
+            Sort.Order order = "asc".equalsIgnoreCase(direction)
+                    ? Sort.Order.asc(column)
+                    : Sort.Order.desc(column);
+
+            orders.add(order);
+        }
+
+        // If no valid orders parsed, use default
+        if (orders.isEmpty()) {
+            String defaultColumn = config.getDefaultSortColumn();
+            String defaultDirection = config.getDefaultSortDirection();
+
+            return "asc".equalsIgnoreCase(defaultDirection)
+                    ? Sort.by(defaultColumn).ascending()
+                    : Sort.by(defaultColumn).descending();
+        }
+
+        return Sort.by(orders);
+    }
+
+    /**
+     * Convert entity to response DTO (with all fields)
+     * Filtering will be applied later based on role
+     */
+    private BankStatementResponse toResponse(BankStatement entity) {
         return BankStatementResponse.builder()
-                .id(statement.getId())
-                .transactionDateTime(statement.getTransactionDateTime())
-                .amount(statement.getAmount())
-                .balance(statement.getBalance())
-                .orderId(statement.getOrderId())
-                .reference(statement.getReference())
-                .payIn(statement.isPayIn())
-                .accountNo(statement.getAccountNo())
-                .utr(statement.getUtr())
-                .gatewayTransactionId(statement.getGatewayTransactionId())
-                .uploadTimestamp(statement.getUploadTimestamp())
-                .approvalStatus(statement.getApprovalStatus() != null ? statement.getApprovalStatus().name() : null)
-                .processed(statement.isProcessed())
-                .type(statement.getType())
-                // Upload metadata (if needed, can be null if lazy-loaded)
-                .uploadId(statement.getUpload() != null ? statement.getUpload().getId() : null)
-                .uploadUsername(statement.getUpload() != null ? statement.getUpload().getUsername() : null)
-                .bankName(statement.getUpload() != null && statement.getUpload().getBank() != null
-                        ? statement.getUpload().getBank().getName() : null)
-                .bankParserKey(statement.getUpload() != null && statement.getUpload().getBank() != null
-                        ? statement.getUpload().getBank().getParserKey() : null)
+                .id(entity.getId())
+                .transactionDateTime(entity.getTransactionDateTime())
+                .amount(entity.getAmount())
+                .balance(entity.getBalance())
+                .orderId(entity.getOrderId())
+                .reference(entity.getReference())
+                .payIn(entity.isPayIn())
+                .accountNo(entity.getAccountNo())
+                .utr(entity.getUtr())
+                .gatewayTransactionId(entity.getGatewayTransactionId())
+                .uploadTimestamp(entity.getUploadTimestamp())
+                .approvalStatus(entity.getApprovalStatus() != null ? entity.getApprovalStatus().name() : null)
+                .processed(entity.isProcessed())
+                .type(entity.getType())
+                .uploadId(entity.getUpload() != null ? entity.getUpload().getId() : null)
+                .uploadUsername(entity.getUpload() != null ? entity.getUpload().getUsername() : null)
+                .bankName(entity.getUpload() != null && entity.getUpload().getBank() != null
+                        ? entity.getUpload().getBank().getName() : null)
+                .bankParserKey(entity.getUpload() != null && entity.getUpload().getBank() != null
+                        ? entity.getUpload().getBank().getParserKey() : null)
                 .build();
     }
 
     /**
-     * Count items in list (for logging)
+     * Build sort string for response (e.g., "transactionDateTime: DESC")
      */
-    private int countItems(List<?> list) {
-        return list != null ? list.size() : 0;
+    private String buildSortString(Sort sort) {
+        if (sort.isUnsorted()) {
+            return "unsorted";
+        }
+
+        return sort.stream()
+                .map(order -> order.getProperty() + ": " + order.getDirection())
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("unsorted");
     }
 }

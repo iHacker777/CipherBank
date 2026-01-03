@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Paginated response for bank statements
- * Includes pagination metadata and the actual data
+ * Paginated response for bank statement search
+ * Includes pagination metadata, role information, and column visibility
  */
 @Data
 @NoArgsConstructor
@@ -18,52 +18,66 @@ import java.util.List;
 public class PagedStatementResponse {
 
     /**
+     * User's role that made this request
+     * Example: "ROLE_ADMIN", "ROLE_USER"
+     */
+    private String userRole;
+
+    /**
+     * List of columns visible to this user's role
+     * Only these columns will have non-null values in the statements
+     * Example: ["transactionDateTime", "amount", "orderId", "reference"]
+     */
+    private List<String> visibleColumns;
+
+    /**
      * Current page number (0-indexed)
      */
-    private int pageNo;
+    private Integer pageNo;
 
     /**
-     * Number of items per page
+     * Number of records per page
      */
-    private int pageSize;
+    private Integer pageSize;
 
     /**
-     * Total number of records in database
+     * Total number of records across all pages
      */
-    private long totalRecords;
+    private Long totalRecords;
 
     /**
      * Total number of pages
      */
-    private int totalPages;
+    private Integer totalPages;
 
     /**
-     * Is this the first page?
+     * True if this is the first page
      */
-    private boolean first;
+    private Boolean first;
 
     /**
-     * Is this the last page?
+     * True if this is the last page
      */
-    private boolean last;
+    private Boolean last;
 
     /**
-     * Does a next page exist?
+     * True if there is a next page
      */
-    private boolean hasNext;
+    private Boolean hasNext;
 
     /**
-     * Does a previous page exist?
+     * True if there is a previous page
      */
-    private boolean hasPrevious;
+    private Boolean hasPrevious;
 
     /**
-     * Sort column and direction (e.g., "transactionDateTime,desc")
+     * Sort criteria applied (e.g., "transactionDateTime: DESC")
      */
     private String sort;
 
     /**
-     * The actual statement data for this page
+     * List of bank statements for current page
+     * Fields will be null for columns not visible to the user's role
      */
     private List<BankStatementResponse> statements;
 }

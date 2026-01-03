@@ -4,42 +4,17 @@ import com.paytrix.cipherbank.domain.model.PagedStatementResponse;
 import com.paytrix.cipherbank.domain.model.StatementSearchRequest;
 
 /**
- * Use case for querying bank statements with advanced search
- *
- * All querying is done through the searchStatements method which supports:
- * - Empty filters (returns all records)
- * - Simple filters (single field filtering)
- * - Complex filters (multiple fields with arrays and ranges)
- * - Pagination and sorting
+ * Use case interface for querying bank statements
+ * Provides advanced search with role-based column visibility
  */
 public interface StatementQueryUseCase {
 
     /**
-     * Advanced search with multiple complex filters
+     * Search bank statements with advanced filters and role-based column visibility
      *
-     * Supports filtering by:
-     * - Bank parser keys (multiple)
-     * - Account numbers (multiple)
-     * - Approval statuses (multiple)
-     * - Gateway transaction IDs (multiple)
-     * - Order IDs (multiple)
-     * - Processed status (single)
-     * - Transaction date/time range (flexible format)
-     * - UTRs (multiple)
-     * - Upload timestamp range (flexible format)
-     * - Amount range (min/max)
-     * - Usernames (multiple)
-     *
-     * Plus pagination and sorting on any column.
-     *
-     * USAGE:
-     * - Empty body: Returns all records
-     * - Single filter: {"processed": false}
-     * - Multiple filters: {"bankNames": ["iob"], "processed": false, "accountNos": [123]}
-     * - Date ranges: Accepts both "2025-01-01" (whole day) and "2025-01-01T10:30:00" (exact time)
-     *
-     * @param searchRequest Search criteria with all filters, pagination, and sorting
-     * @return Paginated response with statements and metadata
+     * @param request Search criteria with filters, pagination, and sorting
+     * @param userRole User's role (e.g., "ROLE_ADMIN", "ROLE_USER") for column filtering
+     * @return Paginated response with filtered statements based on user's role
      */
-    PagedStatementResponse searchStatements(StatementSearchRequest searchRequest);
+    PagedStatementResponse searchStatements(StatementSearchRequest request, String userRole);
 }

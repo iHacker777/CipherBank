@@ -6,10 +6,6 @@ spring:
   # DUAL DATABASE CONFIGURATION
   # ============================================================================
 
-  # Security Database Configuration
-  # Database: cipherbank_security
-  # Tables: users, roles, user_roles, ip_whitelist
-  # Purpose: Authentication, authorization, IP whitelisting
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
@@ -24,10 +20,6 @@ spring:
         max-lifetime: 1800000
         pool-name: SecurityHikariPool
 
-    # Business Database Configuration (PRIMARY)
-    # Database: cipherbank
-    # Tables: bank_statements, bank_profiles, bank_statement_uploads
-    # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
       jdbc-url: jdbc:mysql://34.180.14.173:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
@@ -42,7 +34,7 @@ spring:
         pool-name: BusinessHikariPool
 
   # ============================================================================
-  # JPA CONFIGURATION - SECURITY DATABASE
+  # JPA CONFIGURATION
   # ============================================================================
   jpa:
     security:
@@ -65,9 +57,6 @@ spring:
           order_inserts: true
           order_updates: true
 
-    # ============================================================================
-    # JPA CONFIGURATION - BUSINESS DATABASE (PRIMARY)
-    # ============================================================================
     business:
       show-sql: true
       format-sql: true
@@ -113,37 +102,63 @@ springdoc:
 # JWT CONFIGURATION
 # ============================================================================
 jwt:
-  secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
-  encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
-  expiration: 900000  # 15 minutes in milliseconds
+  secret: secret-key1234-secret-key1234-admin
+  encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701
+  expiration: 900000
 
 # ============================================================================
 # IP WHITELIST SECURITY CONFIGURATION
 # ============================================================================
 security:
   ip-whitelist:
-    enabled: true      # Set to false to disable IP whitelist filtering
-    debug: true       # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
+    enabled: true
+    debug: true      # Enable detailed IP logging in production for debugging
 
 # ============================================================================
 # STATEMENT QUERY CONFIGURATION
 # ============================================================================
 statement:
+  # Query pagination and sorting configuration
   query:
-    # Maximum number of records per page (prevents excessive data retrieval)
-    max-page-size: 100
-
-    # Default page size when not specified in request
-    default-page-size: 20
-
-    # Default column to sort by when not specified
-    # Should be a valid BankStatement entity field name
-    # Common values: transactionDateTime, uploadTimestamp, amount, accountNo
+    max-page-size: 100          # Maximum records per page
+    default-page-size: 20       # Default when not specified
     default-sort-column: transactionDateTime
-
-    # Default sort direction when not specified
-    # Values: asc (ascending) or desc (descending)
     default-sort-direction: desc
+
+  # Role-based column visibility configuration
+  columns:
+    visibility:
+      # ROLE_ADMIN: Full access to all columns
+      admin:
+        - id
+        - transactionDateTime
+        - amount
+        - balance
+        - orderId
+        - reference
+        - payIn
+        - accountNo
+        - utr
+        - gatewayTransactionId
+        - uploadTimestamp
+        - approvalStatus
+        - processed
+        - type
+        - uploadId
+        - uploadUsername
+        - bankName
+        - bankParserKey
+
+      # ROLE_USER: Limited access to non-sensitive columns
+      user:
+        - transactionDateTime
+        - amount
+        - orderId
+        - reference
+        - payIn
+        - utr
+        - uploadTimestamp
+        - bankName
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -151,56 +166,11 @@ statement:
 logging:
   level:
     root: INFO
-    # Security Database Logs
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.security: DEBUG
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.security: DEBUG
-    # Business Database Logs
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business: DEBUG
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business: DEBUG
-    # Hibernate SQL (shows queries from both databases)
     org.hibernate.SQL: DEBUG
-    # org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-    # Application logs
     com.paytrix.cipherbank: INFO
-    # DataSource logs (to see which database is being used)
     com.zaxxer.hikari.HikariConfig: DEBUG
     com.zaxxer.hikari.HikariDataSource: INFO
-#
-## ============================================================================
-## PROFILES (Optional - for environment-specific overrides)
-## ============================================================================
-#---
-#spring:
-#  config:
-#    activate:
-#      on-profile: dev
-#
-#  datasource:
-#    security:
-#      url: jdbc:mysql://localhost:3306/cipherbank_security_dev?serverTimezone=UTC
-#    business:
-#      url: jdbc:mysql://localhost:3306/cipherbank_dev?serverTimezone=UTC
-#
-#---
-#spring:
-#  config:
-#    activate:
-#      on-profile: prod
-#
-#  datasource:
-#    security:
-#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank_security?serverTimezone=UTC&allowPublicKeyRetrieval=true
-#    business:
-#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
-#
-#  jpa:
-#    security:
-#      show-sql: false
-#    business:
-#      show-sql: false
-#
-#logging:
-#  level:
-#    root: WARN
-#    com.paytrix.cipherbank: INFO
-#    org.hibernate.SQL: WARN

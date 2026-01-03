@@ -1,19 +1,15 @@
 package com.paytrix.cipherbank.application.port.out.business;
 
-import com.paytrix.cipherbank.domain.model.StatementSearchRequest;
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankStatement;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.util.List;
 
 /**
- * Repository port for BankStatement operations
- *
- * Includes methods for:
- * - Statement upload and deduplication
- * - Payment verification
- * - Advanced search with pagination
+ * Repository port for bank statements
+ * Provides data access operations for bank statement queries
  */
 public interface BankStatementRepositoryPort {
 
@@ -31,26 +27,27 @@ public interface BankStatementRepositoryPort {
     BankStatement save(BankStatement stmt);
 
     /**
-     * DEPRECATED: Use existsByAccountNoAndUtr instead
-     * @deprecated Checks wrong constraint - use existsByAccountNoAndUtr
-     */
-    @Deprecated
-    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
-
-    /**
-     * Check if statement exists with same account number and UTR
-     * Matches database constraint uk_stmt_acct_utr (account_no, utr)
-     * THIS IS THE CORRECT METHOD FOR DEDUPLICATION
+     * Check if a duplicate statement already exists based on ACTUAL database constraint
+     * Database constraint: uk_stmt_acct_utr on (account_no, utr)
+     *
+     * This is the CORRECT deduplication method matching the database schema.
+     * One UTR should only appear once per account, regardless of order_id.
      *
      * @param accountNo Account number
      * @param utr Unique Transaction Reference
-     * @return true if exists, false otherwise
+     * @return true if duplicate exists, false otherwise
      */
     boolean existsByAccountNoAndUtr(Long accountNo, String utr);
 
-    // ============================================================
-    // PAYMENT VERIFICATION
-    // ============================================================
+    /**
+     * @deprecated Use existsByAccountNoAndUtr() instead
+     * This method checked 3 columns (utr, orderId, accountNo) but the database
+     * constraint only enforces 2 columns (accountNo, utr).
+     *
+     * Kept for backward compatibility but should not be used for new code.
+     */
+    @Deprecated
+    boolean existsByUtrAndOrderIdAndAccountNo(String utr, String orderId, Long accountNo);
 
     /**
      * Find ALL unprocessed statements matching orderId and utr combination
@@ -83,33 +80,13 @@ public interface BankStatementRepositoryPort {
      */
     List<BankStatement> findUnprocessedByUtr(String utr);
 
-    // ============================================================
-    // ADVANCED SEARCH with complex filters
-    // ============================================================
-
     /**
-     * Advanced search with multiple complex filters
+     * Find all bank statements matching the given specification with pagination
+     * Used for advanced search with complex filters
      *
-     * Supports filtering by:
-     * - Bank parser keys (multiple)
-     * - Account numbers (multiple)
-     * - Approval statuses (multiple)
-     * - Gateway transaction IDs (multiple)
-     * - Order IDs (multiple)
-     * - Processed status (single)
-     * - Transaction date/time range (flexible format)
-     * - UTRs (multiple)
-     * - Upload timestamp range (flexible format)
-     * - Amount range (min/max)
-     * - Usernames (multiple)
-     *
-     * Plus pagination and sorting on any column.
-     *
-     * EMPTY FILTERS: Returns all records with pagination
-     *
-     * @param searchRequest Search criteria with all filters
+     * @param spec JPA Specification for building dynamic queries
      * @param pageable Pagination and sorting parameters
-     * @return Page of bank statements matching all criteria
+     * @return Page of bank statements matching the criteria
      */
-    Page<BankStatement> searchStatements(StatementSearchRequest searchRequest, Pageable pageable);
+    Page<BankStatement> findAll(Specification<BankStatement> spec, Pageable pageable);
 }

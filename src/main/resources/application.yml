@@ -42,7 +42,7 @@ spring:
         pool-name: BusinessHikariPool
 
   # ============================================================================
-  # JPA CONFIGURATION - SECURITY DATABASE
+  # JPA CONFIGURATION
   # ============================================================================
   jpa:
     security:
@@ -65,9 +65,6 @@ spring:
           order_inserts: true
           order_updates: true
 
-    # ============================================================================
-    # JPA CONFIGURATION - BUSINESS DATABASE (PRIMARY)
-    # ============================================================================
     business:
       show-sql: true
       format-sql: true
@@ -129,21 +126,49 @@ security:
 # STATEMENT QUERY CONFIGURATION
 # ============================================================================
 statement:
+  # Query pagination and sorting configuration
   query:
-    # Maximum number of records per page (prevents excessive data retrieval)
-    max-page-size: 100
+    max-page-size: 100          # Maximum records per page (range: 1-1000)
+    default-page-size: 20       # Default when not specified (range: 1-100)
+    default-sort-column: transactionDateTime    # Default sort column
+    default-sort-direction: desc                # Default sort direction (asc/desc)
 
-    # Default page size when not specified in request
-    default-page-size: 20
+  # Role-based column visibility configuration
+  # Controls which columns are visible to different user roles
+  # Column names must match BankStatementResponse field names exactly
+  columns:
+    visibility:
+      # ROLE_ADMIN: Full access to all columns
+      admin:
+        - id                        # Statement ID
+        - transactionDateTime       # Transaction date/time
+        - amount                    # Transaction amount
+        - balance                   # Account balance after transaction
+        - orderId                   # Order/Transaction ID
+        - reference                 # Payment reference/description
+        - payIn                     # Credit/Debit flag
+        - accountNo                 # Bank account number
+        - utr                       # Unique Transaction Reference
+        - gatewayTransactionId      # Gateway transaction ID
+        - uploadTimestamp           # Upload timestamp
+        - approvalStatus            # Approval status (PENDING/APPROVED/REJECTED)
+        - processed                 # Processing status (true/false)
+        - type                      # Transaction type
+        - uploadId                  # Upload ID
+        - uploadUsername            # Username who uploaded
+        - bankName                  # Bank name
+        - bankParserKey             # Bank parser key (iob/kgb/indianbank)
 
-    # Default column to sort by when not specified
-    # Should be a valid BankStatement entity field name
-    # Common values: transactionDateTime, uploadTimestamp, amount, accountNo
-    default-sort-column: transactionDateTime
-
-    # Default sort direction when not specified
-    # Values: asc (ascending) or desc (descending)
-    default-sort-direction: desc
+      # ROLE_USER: Limited access to non-sensitive columns
+      user:
+        - transactionDateTime       # Transaction date/time
+        - amount                    # Transaction amount
+        - orderId                   # Order/Transaction ID
+        - reference                 # Payment reference/description
+        - payIn                     # Credit/Debit flag
+        - utr                       # Unique Transaction Reference
+        - uploadTimestamp           # Upload timestamp
+        - bankName                  # Bank name
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -165,42 +190,3 @@ logging:
     # DataSource logs (to see which database is being used)
     com.zaxxer.hikari.HikariConfig: DEBUG
     com.zaxxer.hikari.HikariDataSource: INFO
-#
-## ============================================================================
-## PROFILES (Optional - for environment-specific overrides)
-## ============================================================================
-#---
-#spring:
-#  config:
-#    activate:
-#      on-profile: dev
-#
-#  datasource:
-#    security:
-#      url: jdbc:mysql://localhost:3306/cipherbank_security_dev?serverTimezone=UTC
-#    business:
-#      url: jdbc:mysql://localhost:3306/cipherbank_dev?serverTimezone=UTC
-#
-#---
-#spring:
-#  config:
-#    activate:
-#      on-profile: prod
-#
-#  datasource:
-#    security:
-#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank_security?serverTimezone=UTC&allowPublicKeyRetrieval=true
-#    business:
-#      url: jdbc:mysql://paytrix-db.c7as80ggu1ks.ap-south-1.rds.amazonaws.com/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
-#
-#  jpa:
-#    security:
-#      show-sql: false
-#    business:
-#      show-sql: false
-#
-#logging:
-#  level:
-#    root: WARN
-#    com.paytrix.cipherbank: INFO
-#    org.hibernate.SQL: WARN
