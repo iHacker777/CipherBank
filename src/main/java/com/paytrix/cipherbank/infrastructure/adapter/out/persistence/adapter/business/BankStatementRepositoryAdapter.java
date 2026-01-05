@@ -11,6 +11,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Adapter implementing BankStatementRepositoryPort using JPA
@@ -39,6 +40,11 @@ public class BankStatementRepositoryAdapter implements BankStatementRepositoryPo
             log.debug("Duplicate statement detected during save (constraint violation)");
             return null;
         }
+    }
+
+    @Override
+    public Optional<BankStatement> findById(Long id) {
+        return jpa.findById(id);
     }
 
     @Override

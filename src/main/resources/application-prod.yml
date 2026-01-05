@@ -88,6 +88,30 @@ spring:
       file-size-threshold: 0
       location: /tmp
 
+  kafka:
+    bootstrap-servers: kafka-broker1:9092,kafka-broker2:9092,kafka-broker3:9092
+
+    producer:
+      retries: 10  # More retries in production
+      properties:
+        request.timeout.ms: 30000
+        delivery.timeout.ms: 120000
+
+    consumer:
+      properties:
+        session.timeout.ms: 45000
+        heartbeat.interval.ms: 15000
+        max.poll.interval.ms: 300000  # 5 minutes
+
+kafka:
+  topics:
+    statements-uploaded:
+      replication-factor: 3  # Full replication
+    statements-processed:
+      replication-factor: 3
+    statements-dlq:
+      replication-factor: 3
+
 # ============================================================================
 # SWAGGER/OPENAPI CONFIGURATION
 # ============================================================================
@@ -174,3 +198,7 @@ logging:
     com.paytrix.cipherbank: INFO
     com.zaxxer.hikari.HikariConfig: DEBUG
     com.zaxxer.hikari.HikariDataSource: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
+    com.paytrix.cipherbank.infrastructure.adapter.out.kafka: INFO
+    com.paytrix.cipherbank.infrastructure.adapter.in.kafka: INFO

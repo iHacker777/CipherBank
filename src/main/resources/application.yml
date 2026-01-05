@@ -96,6 +96,93 @@ spring:
       file-size-threshold: 0
       location: /tmp
 
+  # ============================================================================
+  # KAFKA CONFIGURATION
+  # ============================================================================
+  kafka:
+    bootstrap-servers: localhost:9092  # Change for production
+
+    # Producer Configuration (CipherBank publishes statements)
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.LongSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all  # Wait for all replicas to acknowledge
+      retries: 3  # Retry on transient failures
+      properties:
+        enable.idempotence: true  # Exactly-once semantics
+        max.in.flight.requests.per.connection: 5
+        compression.type: snappy  # Compress messages
+        linger.ms: 10  # Batch messages for 10ms
+        batch.size: 16384  # 16KB batch size
+
+    # Consumer Configuration (CipherBank consumes responses)
+    consumer:
+      group-id: cipherbank-statement-response-consumer
+      key-deserializer: org.apache.kafka.common.serialization.LongDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      enable-auto-commit: false  # Manual commit for reliability
+      auto-offset-reset: earliest  # Start from beginning on first run
+      max-poll-records: 100  # Process 100 messages per poll
+      properties:
+        spring.json.trusted.packages: com.paytrix.cipherbank.*
+        isolation.level: read_committed  # Only read committed messages
+        session.timeout.ms: 30000  # 30 second session timeout
+        heartbeat.interval.ms: 10000  # 10 second heartbeat
+
+    # Listener Configuration
+    listener:
+      ack-mode: manual  # Manual acknowledgment
+      concurrency: 3  # 3 consumer threads (half of partitions)
+      type: batch  # Can be 'single' or 'batch'
+
+# ============================================================================
+# KAFKA TOPICS CONFIGURATION
+# ============================================================================
+kafka:
+  topics:
+    # Topic: CipherBank → Gateway
+    statements-uploaded:
+      name: bank.statements.uploaded
+      partitions: 6
+      replication-factor: 1  # Use 3 in production
+
+    # Topic: Gateway → CipherBank
+    statements-processed:
+      name: payment.statements.processed
+      partitions: 6
+      replication-factor: 1  # Use 3 in production
+
+    # Dead Letter Queue
+    statements-dlq:
+      name: bank.statements.uploaded.dlq
+      partitions: 3
+      replication-factor: 1  # Use 3 in production
+
+  # Consumer configuration
+  consumer:
+    group-id: cipherbank-statement-response-consumer
+    concurrency: 3  # Number of consumer threads
+
+  # Producer configuration
+  producer:
+    retry-attempts: 3
+    retry-backoff-ms: 1000
+
+# ============================================================================
+# MONITORING & METRICS
+# ============================================================================
+management:
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
 # ============================================================================
 # SWAGGER/OPENAPI CONFIGURATION
 # ============================================================================
@@ -190,3 +277,7 @@ logging:
     # DataSource logs (to see which database is being used)
     com.zaxxer.hikari.HikariConfig: DEBUG
     com.zaxxer.hikari.HikariDataSource: INFO
+    org.apache.kafka: INFO
+    org.springframework.kafka: INFO
+    com.paytrix.cipherbank.infrastructure.adapter.out.kafka: DEBUG
+    com.paytrix.cipherbank.infrastructure.adapter.in.kafka: DEBUG

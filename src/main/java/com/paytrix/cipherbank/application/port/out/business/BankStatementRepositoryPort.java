@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Repository port for bank statements
@@ -25,6 +26,15 @@ public interface BankStatementRepositoryPort {
      * @return Saved statement or null if duplicate
      */
     BankStatement save(BankStatement stmt);
+
+    /**
+     * Find statement by ID
+     * Used by Kafka consumer to update statement with Gateway response
+     *
+     * @param id Statement ID (primary key)
+     * @return Optional containing statement if found
+     */
+    Optional<BankStatement> findById(Long id);
 
     /**
      * Check if a duplicate statement already exists based on ACTUAL database constraint
