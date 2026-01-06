@@ -88,29 +88,77 @@ spring:
       file-size-threshold: 0
       location: /tmp
 
+  # ============================================================================
+  # KAFKA CONFIGURATION
+  # ============================================================================
   kafka:
-    bootstrap-servers: kafka-broker1:9092,kafka-broker2:9092,kafka-broker3:9092
+    bootstrap-servers: localhost:9092
 
+    # Producer Configuration (CipherBank publishes statements)
     producer:
-      retries: 10  # More retries in production
+      key-serializer: org.apache.kafka.common.serialization.LongSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all  # Wait for all replicas to acknowledge
+      retries: 3  # Retry on transient failures
       properties:
-        request.timeout.ms: 30000
-        delivery.timeout.ms: 120000
+        enable.idempotence: true  # Exactly-once semantics
+        max.in.flight.requests.per.connection: 5
+        compression.type: snappy  # Compress messages
+        linger.ms: 10  # Batch messages for 10ms
+        batch.size: 16384  # 16KB batch size
 
+    # Consumer Configuration (CipherBank consumes responses)
     consumer:
+      group-id: cipherbank-statement-response-consumer
+      key-deserializer: org.apache.kafka.common.serialization.LongDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      enable-auto-commit: false  # Manual commit for reliability
+      auto-offset-reset: earliest  # Start from beginning on first run
+      max-poll-records: 100  # Process 100 messages per poll
       properties:
-        session.timeout.ms: 45000
-        heartbeat.interval.ms: 15000
-        max.poll.interval.ms: 300000  # 5 minutes
+        spring.json.trusted.packages: com.paytrix.cipherbank.*
+        isolation.level: read_committed  # Only read committed messages
+        session.timeout.ms: 30000  # 30 second session timeout
+        heartbeat.interval.ms: 10000  # 10 second heartbeat
 
+    # Listener Configuration
+    listener:
+      ack-mode: manual  # Manual acknowledgment
+      concurrency: 3  # 3 consumer threads (half of partitions)
+      type: batch  # Can be 'single' or 'batch'
+
+# ============================================================================
+# KAFKA TOPICS CONFIGURATION
+# ============================================================================
 kafka:
   topics:
+    # Topic: CipherBank → Gateway
     statements-uploaded:
-      replication-factor: 3  # Full replication
+      name: bank.statements.uploaded
+      partitions: 6
+      replication-factor: 3
+
+    # Topic: Gateway → CipherBank
     statements-processed:
+      name: payment.statements.processed
+      partitions: 6
       replication-factor: 3
+
+    # Dead Letter Queue
     statements-dlq:
+      name: bank.statements.uploaded.dlq
+      partitions: 3
       replication-factor: 3
+
+  # Consumer configuration
+  consumer:
+    group-id: cipherbank-statement-response-consumer
+    concurrency: 3  # Number of consumer threads
+
+  # Producer configuration
+  producer:
+    retry-attempts: 3
+    retry-backoff-ms: 1000
 
 # ============================================================================
 # SWAGGER/OPENAPI CONFIGURATION
