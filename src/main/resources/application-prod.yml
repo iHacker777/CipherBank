@@ -89,7 +89,7 @@ spring:
       location: /tmp
 
   kafka:
-    bootstrap-servers: kafka-broker1:9092,kafka-broker2:9092,kafka-broker3:9092
+    bootstrap-servers: localhost:9092
 
     producer:
       retries: 10  # More retries in production
