@@ -27,10 +27,10 @@ public class StatementEventPublisherAdapter implements StatementEventPublisher {
 
     private final KafkaTemplate<Long, Object> kafkaTemplate;
 
-    @Value("${kafka.topics.statements-uploaded.name}")
+    @Value("${kafka.topic.bank-statements-uploaded.name}")
     private String statementsUploadedTopic;
 
-    @Value("${kafka.producer.retry-attempts:3}")
+    @Value("${kafka.producer.retries:3}")
     private int retryAttempts;
 
     public StatementEventPublisherAdapter(KafkaTemplate<Long, Object> kafkaTemplate) {

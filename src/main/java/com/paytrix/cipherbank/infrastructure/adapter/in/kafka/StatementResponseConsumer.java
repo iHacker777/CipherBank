@@ -42,7 +42,7 @@ public class StatementResponseConsumer {
      * @param acknowledgment Manual acknowledgment object
      */
     @KafkaListener(
-            topics = "${kafka.topics.statements-processed.name}",
+            topics = "${kafka.topic.payment-statements-processed.name}",
             groupId = "${kafka.consumer.group-id}",
             containerFactory = "kafkaListenerContainerFactory"
     )

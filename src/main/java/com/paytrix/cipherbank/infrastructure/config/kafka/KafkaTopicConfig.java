@@ -21,31 +21,31 @@ public class KafkaTopicConfig {
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
-    @Value("${kafka.topics.statements-uploaded.name}")
+    @Value("${kafka.topic.bank-statements-uploaded.name}")
     private String statementsUploadedTopic;
 
-    @Value("${kafka.topics.statements-uploaded.partitions}")
+    @Value("${kafka.topics.bank-statements-uploaded.partitions}")
     private int statementsUploadedPartitions;
 
-    @Value("${kafka.topics.statements-uploaded.replication-factor}")
+    @Value("${kafka.topic.bank-statements-uploaded.replication-factor}")
     private short statementsUploadedReplication;
 
-    @Value("${kafka.topics.statements-processed.name}")
+    @Value("${kafka.topic.payment-statements-processed.name}")
     private String statementsProcessedTopic;
 
-    @Value("${kafka.topics.statements-processed.partitions}")
+    @Value("${kafka.topic.payment-statements-processed.partitions}")
     private int statementsProcessedPartitions;
 
-    @Value("${kafka.topics.statements-processed.replication-factor}")
+    @Value("${kafka.topic.payment-statements-processed.replication-factor}")
     private short statementsProcessedReplication;
 
-    @Value("${kafka.topics.statements-dlq.name}")
+    @Value("${kafka.topic.bank-statements-dlq.name}")
     private String statementsDlqTopic;
 
-    @Value("${kafka.topics.statements-dlq.partitions}")
+    @Value("${kafka.topics.bank-statements-dlq.partitions}")
     private int statementsDlqPartitions;
 
-    @Value("${kafka.topics.statements-dlq.replication-factor}")
+    @Value("${kafka.topics.bank-statements-dlq.replication-factor}")
     private short statementsDlqReplication;
 
     /**

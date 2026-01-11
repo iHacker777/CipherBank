@@ -3,9 +3,13 @@ spring:
     name: cipherbank
 
   # ============================================================================
-  # DUAL DATABASE CONFIGURATION
+  # DUAL DATABASE CONFIGURATION (PRODUCTION)
   # ============================================================================
 
+  # Security Database Configuration
+  # Database: paytrix_db (contains security tables)
+  # Tables: users, roles, user_roles, ip_whitelist
+  # Purpose: Authentication, authorization, IP whitelisting
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
@@ -20,6 +24,10 @@ spring:
         max-lifetime: 1800000
         pool-name: SecurityHikariPool
 
+    # Business Database Configuration (PRIMARY)
+    # Database: cipherbank
+    # Tables: bank_statements, bank_profiles, bank_statement_uploads
+    # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
       jdbc-url: jdbc:mysql://34.180.14.173:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
@@ -34,7 +42,7 @@ spring:
         pool-name: BusinessHikariPool
 
   # ============================================================================
-  # JPA CONFIGURATION
+  # JPA CONFIGURATION - SECURITY DATABASE (PRODUCTION)
   # ============================================================================
   jpa:
     security:
@@ -57,6 +65,9 @@ spring:
           order_inserts: true
           order_updates: true
 
+    # ============================================================================
+    # JPA CONFIGURATION - BUSINESS DATABASE (PRIMARY - PRODUCTION)
+    # ============================================================================
     business:
       show-sql: true
       format-sql: true
@@ -78,7 +89,7 @@ spring:
           order_updates: true
 
   # ============================================================================
-  # FILE UPLOAD CONFIGURATION
+  # FILE UPLOAD CONFIGURATION (PRODUCTION)
   # ============================================================================
   servlet:
     multipart:
@@ -89,79 +100,79 @@ spring:
       location: /tmp
 
   # ============================================================================
-  # KAFKA CONFIGURATION
+  # KAFKA CONFIGURATION (PRODUCTION)
   # ============================================================================
   kafka:
+    # Kafka Bootstrap Servers (PRODUCTION CLUSTER)
     bootstrap-servers: localhost:9092
+    # Example production: kafka-prod-1.example.com:9092,kafka-prod-2.example.com:9092,kafka-prod-3.example.com:9092
 
-    # Producer Configuration (CipherBank publishes statements)
+    # Producer Configuration
     producer:
+      # Serializers (SAME as dev)
       key-serializer: org.apache.kafka.common.serialization.LongSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all  # Wait for all replicas to acknowledge
-      retries: 3  # Retry on transient failures
-      properties:
-        enable.idempotence: true  # Exactly-once semantics
-        max.in.flight.requests.per.connection: 5
-        compression.type: snappy  # Compress messages
-        linger.ms: 10  # Batch messages for 10ms
-        batch.size: 16384  # 16KB batch size
 
-    # Consumer Configuration (CipherBank consumes responses)
-    consumer:
-      group-id: cipherbank-statement-response-consumer
-      key-deserializer: org.apache.kafka.common.serialization.LongDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      enable-auto-commit: false  # Manual commit for reliability
-      auto-offset-reset: earliest  # Start from beginning on first run
-      max-poll-records: 100  # Process 100 messages per poll
+      # Reliability settings (SAME as dev)
+      acks: all  # Wait for all replicas to acknowledge
+      retries: 3
+
+      # Idempotence (exactly-once semantics)
       properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+        # Compression (SAME as dev)
+        compression.type: snappy
+
+        # Batch settings for throughput (SAME as dev)
+        batch.size: 16384
+        linger.ms: 10
+        buffer.memory: 33554432
+
+    # Consumer Configuration
+    consumer:
+      # Serializers with error handling (SAME as dev)
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+
+      # Consumer group (SAME as dev)
+      group-id: cipherbank-statement-response-consumer
+
+      # Consumer behavior (SAME as dev)
+      auto-offset-reset: earliest  # Start from beginning if no offset
+      enable-auto-commit: false  # Manual commit for reliability
+
+      # Delegate deserializers and JSON settings (SAME as dev)
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.LongDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.paytrix.cipherbank.*
-        isolation.level: read_committed  # Only read committed messages
-        session.timeout.ms: 30000  # 30 second session timeout
-        heartbeat.interval.ms: 10000  # 10 second heartbeat
+        spring.json.value.default.type: com.paytrix.cipherbank.infrastructure.adapter.in.kafka.event.StatementProcessedEvent
+
+        # Session and polling (SAME as dev)
+        session.timeout.ms: 30000  # 30 seconds
+        heartbeat.interval.ms: 10000  # 10 seconds
+        max.poll.interval.ms: 300000  # 5 minutes
+        max.poll.records: 100
+
+        # Isolation level (only read committed messages)
+        isolation.level: read_committed
 
     # Listener Configuration
     listener:
-      ack-mode: manual  # Manual acknowledgment
-      concurrency: 3  # 3 consumer threads (half of partitions)
-      type: batch  # Can be 'single' or 'batch'
+      # Acknowledgment mode (SAME as dev)
+      ack-mode: manual  # Manual acknowledgment for control
+
+      # Concurrency (number of consumer threads)
+      # PROD: 6 threads (higher load, more throughput)
+      concurrency: 6
+
+      # Error handling (SAME as dev)
+      type: batch  # Process records in batches
 
 # ============================================================================
-# KAFKA TOPICS CONFIGURATION
-# ============================================================================
-kafka:
-  topics:
-    # Topic: CipherBank → Gateway
-    statements-uploaded:
-      name: bank.statements.uploaded
-      partitions: 6
-      replication-factor: 3
-
-    # Topic: Gateway → CipherBank
-    statements-processed:
-      name: payment.statements.processed
-      partitions: 6
-      replication-factor: 3
-
-    # Dead Letter Queue
-    statements-dlq:
-      name: bank.statements.uploaded.dlq
-      partitions: 3
-      replication-factor: 3
-
-  # Consumer configuration
-  consumer:
-    group-id: cipherbank-statement-response-consumer
-    concurrency: 3  # Number of consumer threads
-
-  # Producer configuration
-  producer:
-    retry-attempts: 3
-    retry-backoff-ms: 1000
-
-# ============================================================================
-# SWAGGER/OPENAPI CONFIGURATION
+# SWAGGER/OPENAPI CONFIGURATION (PRODUCTION)
 # ============================================================================
 springdoc:
   api-docs:
@@ -171,33 +182,94 @@ springdoc:
     path: /swagger-ui.html
 
 # ============================================================================
-# JWT CONFIGURATION
+# JWT CONFIGURATION (PRODUCTION)
 # ============================================================================
 jwt:
-  secret: secret-key1234-secret-key1234-admin
-  encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701
-  expiration: 900000
+  secret: secret-key1234-secret-key1234-admin   # 32+ chars for HS256
+  encryption-secret: 3f7a9c1d2b4e5f8091a2b3c4d5e6f701   # 128 bits encryption key
+  expiration: 900000  # 15 minutes in milliseconds
 
 # ============================================================================
-# IP WHITELIST SECURITY CONFIGURATION
+# IP WHITELIST SECURITY CONFIGURATION (PRODUCTION)
 # ============================================================================
 security:
   ip-whitelist:
-    enabled: true
-    debug: true      # Enable detailed IP logging in production for debugging
+    enabled: true      # Set to false to disable IP whitelist filtering
+    debug: true        # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
 
 # ============================================================================
-# STATEMENT QUERY CONFIGURATION
+# KAFKA TOPIC CONFIGURATION (PRODUCTION)
+# ============================================================================
+kafka:
+  # Topic: bank.statements.uploaded (CipherBank -> Gateway)
+  topic:
+    bank-statements-uploaded:
+      name: bank.statements.uploaded
+      partitions: 6  # SAME as dev
+      replication-factor: 3  # PROD: 3 replicas (high availability)
+      retention-ms: 604800000  # 7 days (SAME as dev)
+      compression-type: snappy  # SAME as dev
+
+    # Topic: payment.statements.processed (Gateway -> CipherBank)
+    payment-statements-processed:
+      name: payment.statements.processed
+      partitions: 6  # SAME as dev
+      replication-factor: 3  # PROD: 3 replicas (high availability)
+      retention-ms: 259200000  # 3 days (SAME as dev)
+      compression-type: snappy  # SAME as dev
+
+    bank-statements-dlq:
+      name: bank.statements.dlq
+      partitions: 3
+      replication-factor: 1  # DEV: 1 (single broker)
+      retention-ms: 259200000  # 7 days
+      compression-type: snappy
+
+  # Consumer Configuration
+  consumer:
+    # Consumer group ID (SAME as dev)
+    group-id: cipherbank-statement-response-consumer
+
+    # Concurrency (consumer threads)
+    # PROD: 6 threads per topic (higher throughput)
+    concurrency: 6
+
+    # Polling configuration (SAME as dev)
+    max-poll-records: 100
+    max-poll-interval-ms: 300000  # 5 minutes
+    session-timeout-ms: 30000  # 30 seconds
+    heartbeat-interval-ms: 10000  # 10 seconds
+
+  # Producer Configuration
+  producer:
+    # Retry configuration (SAME as dev)
+    retries: 3
+    retry-backoff-ms: 100
+
+    # Batch configuration (SAME as dev)
+    batch-size: 16384
+    linger-ms: 10
+
+    # Compression (SAME as dev)
+    compression-type: snappy
+
+    # Idempotence (SAME as dev)
+    enable-idempotence: true
+
+  # Admin Configuration (for topic creation)
+  admin:
+    auto-create: false  # PROD: false (manual topic creation for control)
+    operation-timeout: 30000  # SAME as dev
+
+# ============================================================================
+# STATEMENT QUERY SERVICE CONFIGURATION (PRODUCTION)
 # ============================================================================
 statement:
-  # Query pagination and sorting configuration
   query:
-    max-page-size: 100          # Maximum records per page
-    default-page-size: 20       # Default when not specified
+    max-page-size: 100
+    default-page-size: 20
     default-sort-column: transactionDateTime
     default-sort-direction: desc
-
-  # Role-based column visibility configuration
   columns:
     visibility:
       # ROLE_ADMIN: Full access to all columns
@@ -233,20 +305,24 @@ statement:
         - bankName
 
 # ============================================================================
-# LOGGING CONFIGURATION
+# LOGGING CONFIGURATION (PRODUCTION)
 # ============================================================================
 logging:
   level:
     root: INFO
+    # Security Database Logs
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.security: DEBUG
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.security: DEBUG
+    # Business Database Logs
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business: DEBUG
     com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business: DEBUG
+    # Hibernate SQL (shows queries from both databases)
     org.hibernate.SQL: DEBUG
+    # Application logs
     com.paytrix.cipherbank: INFO
+    # DataSource logs (to see which database is being used)
     com.zaxxer.hikari.HikariConfig: DEBUG
     com.zaxxer.hikari.HikariDataSource: INFO
-    org.apache.kafka: WARN
-    org.springframework.kafka: WARN
-    com.paytrix.cipherbank.infrastructure.adapter.out.kafka: INFO
-    com.paytrix.cipherbank.infrastructure.adapter.in.kafka: INFO
+    # Kafka logs
+    org.apache.kafka: INFO
+    org.springframework.kafka: INFO
