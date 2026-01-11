@@ -24,7 +24,7 @@ public class KafkaTopicConfig {
     @Value("${kafka.topic.bank-statements-uploaded.name}")
     private String statementsUploadedTopic;
 
-    @Value("${kafka.topics.bank-statements-uploaded.partitions}")
+    @Value("${kafka.topic.bank-statements-uploaded.partitions}")
     private int statementsUploadedPartitions;
 
     @Value("${kafka.topic.bank-statements-uploaded.replication-factor}")
@@ -42,10 +42,10 @@ public class KafkaTopicConfig {
     @Value("${kafka.topic.bank-statements-dlq.name}")
     private String statementsDlqTopic;
 
-    @Value("${kafka.topics.bank-statements-dlq.partitions}")
+    @Value("${kafka.topic.bank-statements-dlq.partitions}")
     private int statementsDlqPartitions;
 
-    @Value("${kafka.topics.bank-statements-dlq.replication-factor}")
+    @Value("${kafka.topic.bank-statements-dlq.replication-factor}")
     private short statementsDlqReplication;
 
     /**
@@ -60,7 +60,7 @@ public class KafkaTopicConfig {
     }
 
     /**
-     * Topic: bank.statements.uploaded
+     * Topic: bank.statements.uploaded (CipherBank -> Gateway)
      * Purpose: CipherBank publishes new statements for Gateway to process
      */
     @Bean
@@ -75,7 +75,7 @@ public class KafkaTopicConfig {
     }
 
     /**
-     * Topic: payment.statements.processed
+     * Topic: payment.statements.processed (Gateway -> CipherBank)
      * Purpose: Gateway publishes processing results back to CipherBank
      */
     @Bean
