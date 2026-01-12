@@ -40,7 +40,7 @@ jobs:
         echo "deploy_start=$(date +%s)" >> $GITHUB_OUTPUT
     
     - name: Notify Deployment Started
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -104,7 +104,7 @@ jobs:
         echo "jar_size_mb=$JAR_SIZE_MB" >> $GITHUB_ENV
     
     - name: Notify Build Completed
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -491,7 +491,7 @@ jobs:
         echo "✅ JAR uploaded and verified successfully"
     
     - name: Notify Upload Completed
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -649,7 +649,7 @@ jobs:
         '
     
     - name: Notify Kafka Ready
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -1188,7 +1188,7 @@ jobs:
     
     - name: Send Telegram Notification - Success
       if: success()
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -1232,7 +1232,7 @@ jobs:
     
     - name: Send Telegram Notification - Failure
       if: failure()
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -1285,7 +1285,7 @@ jobs:
     
     - name: Send CRITICAL System Down Alert
       if: failure() && steps.check_system_down.outputs.is_critical == 'true'
-      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      uses: appleboy/telegram-action@v0.1.1
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -1371,3 +1371,4 @@ jobs:
           
           ☎️ *ESCALATE IF NEEDED*
           This is a P0 production incident requiring immediate response.
+
