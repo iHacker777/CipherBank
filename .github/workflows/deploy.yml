@@ -8,7 +8,7 @@ on:
       skip_tests:
         description: 'Skip Maven tests'
         required: false
-        default: 'true'
+        default: true
         type: boolean
 
 concurrency:
@@ -294,57 +294,55 @@ jobs:
         NGINX_CONF="/www/server/panel/vhost/nginx/proxy/cipherbank.conf"
         if [ ! -f "$NGINX_CONF" ]; then
           echo "📝 Creating nginx proxy configuration..."
-          cat > "$NGINX_CONF" <<'EOF'
-# CipherBank Backend Proxy Configuration
-# Auto-managed by GitHub Actions deployment workflow
-# Ports: 8083 (blue), 8084 (green)
-
-location /api/ {
-    proxy_pass http://127.0.0.1:8083/api/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_connect_timeout 60s;
-    proxy_send_timeout 60s;
-    proxy_read_timeout 60s;
-    proxy_buffering on;
-    proxy_buffer_size 4k;
-    proxy_buffers 8 4k;
-    proxy_busy_buffers_size 8k;
-    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503;
-    proxy_next_upstream_tries 2;
-}
-
-location ^~ /swagger-ui/ {
-    proxy_pass http://127.0.0.1:8083/swagger-ui/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location ^~ /v3/api-docs {
-    proxy_pass http://127.0.0.1:8083/v3/api-docs;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location /actuator/ {
-    proxy_pass http://127.0.0.1:8083/actuator/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    access_log off;
-}
-EOF
+          echo "# CipherBank Backend Proxy Configuration" > "$NGINX_CONF"
+          echo "# Auto-managed by GitHub Actions deployment workflow" >> "$NGINX_CONF"
+          echo "# Ports: 8083 (blue), 8084 (green)" >> "$NGINX_CONF"
+          echo "" >> "$NGINX_CONF"
+          echo "location /api/ {" >> "$NGINX_CONF"
+          echo "    proxy_pass http://127.0.0.1:8083/api/;" >> "$NGINX_CONF"
+          echo "    proxy_http_version 1.1;" >> "$NGINX_CONF"
+          echo "    proxy_set_header Host \$host;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Real-IP \$remote_addr;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-Proto \$scheme;" >> "$NGINX_CONF"
+          echo "    proxy_connect_timeout 60s;" >> "$NGINX_CONF"
+          echo "    proxy_send_timeout 60s;" >> "$NGINX_CONF"
+          echo "    proxy_read_timeout 60s;" >> "$NGINX_CONF"
+          echo "    proxy_buffering on;" >> "$NGINX_CONF"
+          echo "    proxy_buffer_size 4k;" >> "$NGINX_CONF"
+          echo "    proxy_buffers 8 4k;" >> "$NGINX_CONF"
+          echo "    proxy_busy_buffers_size 8k;" >> "$NGINX_CONF"
+          echo "    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503;" >> "$NGINX_CONF"
+          echo "    proxy_next_upstream_tries 2;" >> "$NGINX_CONF"
+          echo "}" >> "$NGINX_CONF"
+          echo "" >> "$NGINX_CONF"
+          echo "location ^~ /swagger-ui/ {" >> "$NGINX_CONF"
+          echo "    proxy_pass http://127.0.0.1:8083/swagger-ui/;" >> "$NGINX_CONF"
+          echo "    proxy_http_version 1.1;" >> "$NGINX_CONF"
+          echo "    proxy_set_header Host \$host;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Real-IP \$remote_addr;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-Proto \$scheme;" >> "$NGINX_CONF"
+          echo "}" >> "$NGINX_CONF"
+          echo "" >> "$NGINX_CONF"
+          echo "location ^~ /v3/api-docs {" >> "$NGINX_CONF"
+          echo "    proxy_pass http://127.0.0.1:8083/v3/api-docs;" >> "$NGINX_CONF"
+          echo "    proxy_http_version 1.1;" >> "$NGINX_CONF"
+          echo "    proxy_set_header Host \$host;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Real-IP \$remote_addr;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-Proto \$scheme;" >> "$NGINX_CONF"
+          echo "}" >> "$NGINX_CONF"
+          echo "" >> "$NGINX_CONF"
+          echo "location /actuator/ {" >> "$NGINX_CONF"
+          echo "    proxy_pass http://127.0.0.1:8083/actuator/;" >> "$NGINX_CONF"
+          echo "    proxy_http_version 1.1;" >> "$NGINX_CONF"
+          echo "    proxy_set_header Host \$host;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Real-IP \$remote_addr;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" >> "$NGINX_CONF"
+          echo "    proxy_set_header X-Forwarded-Proto \$scheme;" >> "$NGINX_CONF"
+          echo "    access_log off;" >> "$NGINX_CONF"
+          echo "}" >> "$NGINX_CONF"
           if [ ! -f "$NGINX_CONF" ] || [ ! -s "$NGINX_CONF" ]; then
             echo "❌ Failed to create nginx configuration!"
             exit 1
@@ -764,19 +762,17 @@ EOF
         log "✅ JAR ownership verified"
 
         log "Creating .env file for $TARGET_INSTANCE instance..."
-        cat > "$APP_DIR/$TARGET_INSTANCE/.env" <<ENVEOF
-DB_HOST=${DB_HOST}
-DB_PORT=3306
-DB_NAME=cipherbank
-DB_USERNAME=root
-DB_PASSWORD=${DB_PASSWORD}
-SERVER_PORT=${TARGET_PORT}
-SPRING_PROFILES_ACTIVE=prod
-IP_WHITELIST_ENABLED=true
-IP_WHITELIST_DEBUG=true
-LOG_PATH=/var/log/cipherbank
-LOG_FILE=/var/log/cipherbank/app.log
-ENVEOF
+        echo "DB_HOST=\${DB_HOST}" > "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "DB_PORT=3306" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "DB_NAME=cipherbank" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "DB_USERNAME=root" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "DB_PASSWORD=\${DB_PASSWORD}" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "SERVER_PORT=\${TARGET_PORT}" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "SPRING_PROFILES_ACTIVE=prod" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "IP_WHITELIST_ENABLED=true" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "IP_WHITELIST_DEBUG=true" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "LOG_PATH=/var/log/cipherbank" >> "$APP_DIR/$TARGET_INSTANCE/.env"
+        echo "LOG_FILE=/var/log/cipherbank/app.log" >> "$APP_DIR/$TARGET_INSTANCE/.env"
 
         if [ ! -f "$APP_DIR/$TARGET_INSTANCE/.env" ] || [ ! -s "$APP_DIR/$TARGET_INSTANCE/.env" ]; then
           log "❌ Failed to create .env file"
@@ -1071,10 +1067,8 @@ ENVEOF
         echo "🚀 Starting secure deployment with secrets protection..."
         
         # Create secure temp file with secrets
-        cat > /tmp/deploy_secrets.env <<'SECRETS_EOF'
-        DB_HOST=${{ secrets.DB_HOST }}
-        DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-        SECRETS_EOF
+        echo "DB_HOST=${{ secrets.DB_HOST }}" > /tmp/deploy_secrets.env
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> /tmp/deploy_secrets.env
         chmod 600 /tmp/deploy_secrets.env
         
         # Upload secrets file securely
