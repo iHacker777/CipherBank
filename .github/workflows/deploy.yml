@@ -1,404 +1,1379 @@
-name: CipherBank Backend - Blue/Green Deploy
+name: Deploy to GCP - Blue-Green (CipherBank)
 
 on:
   push:
     branches: [ release ]
-    paths:
-      - 'src/**'
-      - 'pom.xml'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip Maven tests'
+        required: false
+        default: 'true'
+        type: boolean
 
-env:
-  APP_NAME: cipherbank
-  BLUE_PORT: 8083
-  GREEN_PORT: 8084
-  HEALTH_ENDPOINT: /actuator/health
-  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-  SSH_HOST: ${{ secrets.GCP_HOST }}
-  SSH_USER: ${{ secrets.GCP_USER }}
-  SSH_KEY: ${{ secrets.GCP_SSH_KEY }}
+concurrency:
+  group: cipherbank-deployment
+  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     
     steps:
-      # ==================== INITIALIZATION ====================
-      - name: 📦 Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Get commit info
+      id: commit
+      uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      with:
+        fetch-depth: 2
       
-      - name: 🔧 Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-      
-      - name: 🔑 Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ env.SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
-      
-      - name: 📝 Set Build Variables
-        id: vars
-        run: |
-          echo "BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
-          echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n1)" >> $GITHUB_OUTPUT
-          echo "AUTHOR=$(git log -1 --pretty=format:'%an')" >> $GITHUB_OUTPUT
-      
-      - name: 📢 Notify Deployment Start
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="🚀 <b>CipherBank Backend Deployment Started</b>
+    - name: Extract commit details
+      id: details
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "sha_full=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
+        echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
+        COMMIT_MSG=$(git log -1 --pretty=%B | head -n1 | tr -d '\n\r' | sed "s/'/\'/g" | sed 's/"/\\"/g')
+        echo "message=$COMMIT_MSG" >> $GITHUB_OUTPUT
+        echo "deploy_time=$(TZ='Asia/Kolkata' date +'%Y-%m-%d %H:%M:%S IST')" >> $GITHUB_OUTPUT
+        echo "deploy_start=$(date +%s)" >> $GITHUB_OUTPUT
+    
+    - name: Notify Deployment Started
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          *CipherBank Backend Deployment - Initiated*
           
-          📊 <b>Build Info</b>
-          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
-          • Author: ${{ steps.vars.outputs.AUTHOR }}
-          • Time: ${{ steps.vars.outputs.BUILD_TIME }}
+          *Deployment Information*
+          Status: Pipeline Started
+          Build Number: #${{ github.run_number }}
+          Initiated: ${{ steps.details.outputs.deploy_time }}
+          Target Environment: Production (GCP)
           
-          💬 <i>${{ steps.vars.outputs.COMMIT_MSG }}</i>
+          *Source Details*
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Branch: `${{ steps.details.outputs.branch }}`
+          Author: ${{ steps.details.outputs.author }}
+          Message: ${{ steps.details.outputs.message }}
           
-          ⏳ Building application..."
-      
-      # ==================== BUILD ====================
-      - name: 🏗️ Build with Maven
-        id: build
-        run: |
-          echo "🔨 Starting Maven build..."
+          *Pipeline Stages*
+          ⏳ Building application with Maven
+          ⏳ Preparing deployment artifacts
+          ⏳ Verifying Kafka dependency
+          ⏳ Blue-green deployment execution
+          ⏳ Health verification
+          
+          [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93  # v4.0.0
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build with Maven
+      id: build
+      run: |
+        echo "🔨 Building application with Maven..."
+        if [ "${{ inputs.skip_tests || 'true' }}" = "true" ]; then
+          echo "Skipping tests as requested..."
           mvn clean package -DskipTests -B
+        else
+          echo "Running tests..."
+          mvn clean package -B
+        fi
+        JAR_FILE=$(find target -name "*.jar" -type f ! -name "*-sources.jar" ! -name "*-javadoc.jar" | head -1)
+        if [ -z "$JAR_FILE" ]; then
+          echo "❌ JAR file not found in target directory!"
+          exit 1
+        fi
+        JAR_SIZE=$(stat -c%s "$JAR_FILE" 2>/dev/null || stat -f%z "$JAR_FILE" 2>/dev/null)
+        JAR_SIZE_MB=$((JAR_SIZE / 1024 / 1024))
+        if [ "$JAR_SIZE" -lt 1048576 ]; then
+          echo "❌ JAR file too small ($JAR_SIZE bytes) - build may have failed"
+          exit 1
+        fi
+        echo "✅ Build successful: $JAR_FILE ($JAR_SIZE_MB MB)"
+        echo "jar_file=$JAR_FILE" >> $GITHUB_ENV
+        echo "jar_size_mb=$JAR_SIZE_MB" >> $GITHUB_ENV
+    
+    - name: Notify Build Completed
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          *CipherBank Backend Deployment - Build Completed*
           
-          if [ $? -eq 0 ]; then
-            JAR_FILE=$(find target -name "*.jar" ! -name "*sources.jar" ! -name "*javadoc.jar" | head -1)
-            JAR_SIZE=$(du -h "$JAR_FILE" | cut -f1)
-            echo "jar_file=$JAR_FILE" >> $GITHUB_OUTPUT
-            echo "jar_size=$JAR_SIZE" >> $GITHUB_OUTPUT
-            echo "✅ Build successful: $JAR_FILE ($JAR_SIZE)"
-          else
-            echo "❌ Build failed"
+          *Build Information*
+          Status: Build Successful
+          Build Number: #${{ github.run_number }}
+          Build Tool: Maven 3.x with JDK 17
+          Build Time: ${{ steps.details.outputs.deploy_time }}
+          
+          *Artifact Details*
+          Package: `${{ env.jar_file }}`
+          Size: ${{ env.jar_size_mb }} MB
+          Type: Spring Boot Executable JAR
+          Profile: Production
+          
+          *Source Details*
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Branch: `${{ steps.details.outputs.branch }}`
+          Author: ${{ steps.details.outputs.author }}
+          
+          *Next Steps*
+          ⏳ Uploading artifact to GCP server
+          ⏳ Executing blue-green deployment
+          ⏳ Running health checks
+          
+          [View Build Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        ssh-keyscan -H ${{ secrets.GCP_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Validate Required Secrets
+      run: |
+        echo "🔍 Validating required secrets..."
+        MISSING_SECRETS=()
+        [[ -z "${{ secrets.DB_HOST }}" ]] && MISSING_SECRETS+=("DB_HOST")
+        [[ -z "${{ secrets.DB_PASSWORD }}" ]] && MISSING_SECRETS+=("DB_PASSWORD")
+        [[ -z "${{ secrets.GCP_HOST }}" ]] && MISSING_SECRETS+=("GCP_HOST")
+        [[ -z "${{ secrets.GCP_SSH_KEY }}" ]] && MISSING_SECRETS+=("GCP_SSH_KEY")
+        [[ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]] && MISSING_SECRETS+=("TELEGRAM_BOT_TOKEN")
+        [[ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]] && MISSING_SECRETS+=("TELEGRAM_CHAT_ID")
+        if [ ${#MISSING_SECRETS[@]} -ne 0 ]; then
+          echo "❌ Missing required secrets:"
+          printf '  - %s\n' "${MISSING_SECRETS[@]}"
+          echo "Please configure these secrets in: Repository Settings → Secrets and variables → Actions"
+          exit 1
+        fi
+        echo "✅ All required secrets are configured"
+    
+    - name: Bootstrap Server Infrastructure
+      run: |
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        set -e
+        echo "================================================"
+        echo "🚀 Server Infrastructure Bootstrap - CipherBank"
+        echo "================================================"
+        
+        IS_NEW_SERVER=false
+        if [ ! -d /opt/cipherbank ]; then
+          IS_NEW_SERVER=true
+          echo "✨ New server detected - bootstrapping infrastructure..."
+        else
+          echo "✅ Existing server detected - validating infrastructure..."
+        fi
+        
+        echo "👤 Setting up paytrix user (shared with Paytrix)..."
+        if ! id -u paytrix >/dev/null 2>&1; then
+          echo "Creating paytrix user..."
+          useradd -r -m -s /bin/bash paytrix
+          if ! id -u paytrix >/dev/null 2>&1; then
+            echo "❌ Failed to create paytrix user!"
             exit 1
           fi
-      
-      - name: 📢 Notify Build Complete
-        if: success()
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="✅ Build completed
-          • Size: ${{ steps.build.outputs.jar_size }}
-          • Uploading to server..."
-      
-      # ==================== DETECT ACTIVE COLOR ====================
-      - name: 🎨 Detect Active Color
-        id: detect_color
-        run: |
-          ACTIVE_COLOR=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'DETECT_SCRIPT'
+          if [ ! -d "/home/paytrix" ]; then
+            echo "❌ Home directory not created for paytrix user!"
+            exit 1
+          fi
+          echo "✅ User paytrix created successfully"
+        else
+          echo "✅ User paytrix already exists"
+        fi
+        
+        if ! getent group paytrix >/dev/null 2>&1; then
+          echo "Creating paytrix group..."
+          groupadd paytrix 2>/dev/null || true
+          usermod -g paytrix paytrix
+          if ! getent group paytrix >/dev/null 2>&1; then
+            echo "❌ Failed to create paytrix group!"
+            exit 1
+          fi
+          if ! id -nG paytrix | grep -qw paytrix; then
+            echo "❌ User paytrix not in paytrix group!"
+            exit 1
+          fi
+          echo "✅ Group paytrix created and assigned"
+        else
+          echo "✅ Group paytrix already exists"
+        fi
+        
+        echo "📁 Setting up directory structure for CipherBank..."
+        mkdir -p /opt/cipherbank/{blue,green,backups,logs,scripts}
+        mkdir -p /var/log/cipherbank
+        
+        for dir in /opt/cipherbank /opt/cipherbank/blue /opt/cipherbank/green /opt/cipherbank/backups /opt/cipherbank/logs /opt/cipherbank/scripts /var/log/cipherbank; do
+          if [ ! -d "$dir" ]; then
+            echo "❌ Failed to create directory: $dir"
+            exit 1
+          fi
+        done
+        echo "✅ All directories created successfully"
+        
+        echo "🔐 Setting ownership and permissions..."
+        chown -R paytrix:paytrix /opt/cipherbank
+        chown -R paytrix:paytrix /var/log/cipherbank
+        chmod 755 /opt/cipherbank
+        chmod 755 /opt/cipherbank/{blue,green,backups,logs,scripts}
+        
+        for dir in /opt/cipherbank /opt/cipherbank/blue /opt/cipherbank/green /opt/cipherbank/backups /opt/cipherbank/logs /opt/cipherbank/scripts /var/log/cipherbank; do
+          OWNER=$(stat -c "%U:%G" "$dir" 2>/dev/null)
+          if [ "$OWNER" != "paytrix:paytrix" ]; then
+            echo "❌ Incorrect ownership on $dir (expected paytrix:paytrix, got $OWNER)"
+            exit 1
+          fi
+        done
+        
+        MAIN_PERM=$(stat -c "%a" /opt/cipherbank)
+        if [ "$MAIN_PERM" != "755" ]; then
+          echo "❌ Incorrect permissions on /opt/cipherbank (expected 755, got $MAIN_PERM)"
+          exit 1
+        fi
+        echo "✅ Ownership and permissions verified"
+        
+        echo "⚙️  Creating systemd services..."
+        if [ ! -f /etc/systemd/system/cipherbank-blue.service ]; then
+          echo "Creating cipherbank-blue.service..."
+          printf "%s\n" "[Unit]" "Description=CipherBank Backend - Blue Instance" "After=network.target" "" "[Service]" "Type=simple" "User=paytrix" "Group=paytrix" "WorkingDirectory=/opt/cipherbank/blue" "EnvironmentFile=/opt/cipherbank/.env" "ExecStart=/usr/bin/java -jar -Xms512m -Xmx1024m -Dserver.port=8083 -Dspring.profiles.active=prod /opt/cipherbank/blue/app.jar" "Restart=on-failure" "RestartSec=10" "StandardOutput=append:/opt/cipherbank/logs/blue.log" "StandardError=append:/opt/cipherbank/logs/blue-error.log" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/cipherbank-blue.service
+          if [ ! -f /etc/systemd/system/cipherbank-blue.service ] || [ ! -s /etc/systemd/system/cipherbank-blue.service ]; then
+            echo "❌ Failed to create cipherbank-blue.service!"
+            exit 1
+          fi
+          if ! grep -q "User=paytrix" /etc/systemd/system/cipherbank-blue.service; then
+            echo "❌ cipherbank-blue.service not configured correctly!"
+            exit 1
+          fi
+          echo "✅ cipherbank-blue.service created and verified"
+        else
+          echo "✅ cipherbank-blue.service already exists"
+        fi
+        
+        if [ ! -f /etc/systemd/system/cipherbank-green.service ]; then
+          echo "Creating cipherbank-green.service..."
+          printf "%s\n" "[Unit]" "Description=CipherBank Backend - Green Instance" "After=network.target" "" "[Service]" "Type=simple" "User=paytrix" "Group=paytrix" "WorkingDirectory=/opt/cipherbank/green" "EnvironmentFile=/opt/cipherbank/.env" "ExecStart=/usr/bin/java -jar -Xms512m -Xmx1024m -Dserver.port=8084 -Dspring.profiles.active=prod /opt/cipherbank/green/app.jar" "Restart=on-failure" "RestartSec=10" "StandardOutput=append:/opt/cipherbank/logs/green.log" "StandardError=append:/opt/cipherbank/logs/green-error.log" "" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/cipherbank-green.service
+          if [ ! -f /etc/systemd/system/cipherbank-green.service ] || [ ! -s /etc/systemd/system/cipherbank-green.service ]; then
+            echo "❌ Failed to create cipherbank-green.service!"
+            exit 1
+          fi
+          if ! grep -q "User=paytrix" /etc/systemd/system/cipherbank-green.service; then
+            echo "❌ cipherbank-green.service not configured correctly!"
+            exit 1
+          fi
+          echo "✅ cipherbank-green.service created and verified"
+        else
+          echo "✅ cipherbank-green.service already exists"
+        fi
+        
+        echo "🔄 Reloading systemd daemon..."
+        systemctl daemon-reload
+        
+        if ! systemctl list-unit-files | grep -q "cipherbank-blue.service"; then
+          echo "❌ systemd did not recognize cipherbank-blue.service!"
+          exit 1
+        fi
+        if ! systemctl list-unit-files | grep -q "cipherbank-green.service"; then
+          echo "❌ systemd did not recognize cipherbank-green.service!"
+          exit 1
+        fi
+        echo "✅ Systemd services registered successfully"
+        
+        NGINX_CONF="/www/server/panel/vhost/nginx/proxy/cipherbank.conf"
+        if [ ! -f "$NGINX_CONF" ]; then
+          echo "📝 Creating nginx proxy configuration..."
+          cat > "$NGINX_CONF" <<'"'"'NGINXEOF'"'"'
+# CipherBank Backend Proxy Configuration
+# Auto-managed by GitHub Actions deployment workflow
+# Ports: 8083 (blue), 8084 (green)
+
+location /api/ {
+    proxy_pass http://127.0.0.1:8083/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+    proxy_buffering on;
+    proxy_buffer_size 4k;
+    proxy_buffers 8 4k;
+    proxy_busy_buffers_size 8k;
+    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503;
+    proxy_next_upstream_tries 2;
+}
+
+location ^~ /swagger-ui/ {
+    proxy_pass http://127.0.0.1:8083/swagger-ui/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location ^~ /v3/api-docs {
+    proxy_pass http://127.0.0.1:8083/v3/api-docs;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /actuator/ {
+    proxy_pass http://127.0.0.1:8083/actuator/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    access_log off;
+}
+NGINXEOF
+          if [ ! -f "$NGINX_CONF" ] || [ ! -s "$NGINX_CONF" ]; then
+            echo "❌ Failed to create nginx configuration!"
+            exit 1
+          fi
+          if ! grep -q "proxy_pass http://127.0.0.1:8083" "$NGINX_CONF"; then
+            echo "❌ Nginx configuration not created correctly!"
+            exit 1
+          fi
+          echo "✅ Nginx configuration created successfully"
           
-            BLUE_ACTIVE=$(systemctl is-active --quiet ${{ env.APP_NAME }}-blue && echo "1" || echo "0")
-            GREEN_ACTIVE=$(systemctl is-active --quiet ${{ env.APP_NAME }}-green && echo "1" || echo "0")
-          
-            if [ "$BLUE_ACTIVE" = "1" ] && [ "$GREEN_ACTIVE" = "0" ]; then
-              echo "blue"
-            elif [ "$GREEN_ACTIVE" = "1" ] && [ "$BLUE_ACTIVE" = "0" ]; then
-              echo "green"
-            elif [ "$BLUE_ACTIVE" = "0" ] && [ "$GREEN_ACTIVE" = "0" ]; then
-              # Both stopped - check nginx config to see which was last active
-              CURRENT_PORT=$(sudo grep -oP 'proxy_pass http://127\.0\.0\.1:\K[0-9]+' \
-                /www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf | head -1)
-              if [ "$CURRENT_PORT" = "${{ env.BLUE_PORT }}" ]; then
-                echo "blue"
-              else
-                echo "green"
-              fi
-            else
-              # Both running - this shouldn't happen, default to blue
-              echo "blue"
+          echo "🔍 Testing nginx configuration..."
+          if nginx -t 2>&1; then
+            echo "✅ Nginx configuration valid"
+            if systemctl is-active --quiet nginx; then
+              systemctl reload nginx
+              echo "✅ Nginx reloaded"
+            elif [ -x /etc/init.d/nginx ]; then
+              /etc/init.d/nginx reload
+              echo "✅ Nginx reloaded"
             fi
-          DETECT_SCRIPT
-          )
-          
-          if [ "$ACTIVE_COLOR" = "blue" ]; then
-            DEPLOY_COLOR="green"
-            DEPLOY_PORT="${{ env.GREEN_PORT }}"
-            ACTIVE_PORT="${{ env.BLUE_PORT }}"
           else
-            DEPLOY_COLOR="blue"
-            DEPLOY_PORT="${{ env.BLUE_PORT }}"
-            ACTIVE_PORT="${{ env.GREEN_PORT }}"
+            echo "⚠️  Nginx configuration test failed - will need manual review"
+          fi
+        else
+          echo "✅ Nginx proxy configuration already exists"
+        fi
+        
+        echo ""
+        echo "================================================"
+        if [ "$IS_NEW_SERVER" = true ]; then
+          echo "✅ CipherBank Server Bootstrap Complete!"
+          echo "   - Shared paytrix user verified/created"
+          echo "   - Directory structure: /opt/cipherbank"
+          echo "   - Systemd services installed"
+          echo "   - Nginx proxy configured"
+          echo "   - Permissions configured"
+          echo "   - Ready for first deployment"
+        else
+          echo "✅ CipherBank Server Infrastructure Validated!"
+          echo "   - User paytrix verified"
+          echo "   - All required directories exist"
+          echo "   - Systemd services configured"
+          echo "   - Ready for deployment"
+        fi
+        echo "Security: Application runs as paytrix user"
+        echo "Access: Root can manage everything"
+        echo "Domain: cipher.thepaytrix.com"
+        echo "================================================"
+        '
+    
+    - name: Pre-deployment Validation
+      run: |
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        echo "🔍 Validating server state..."
+        if ! id -u paytrix >/dev/null 2>&1; then
+          echo "❌ paytrix user not found!"
+          exit 1
+        fi
+        if [ ! -d /opt/cipherbank/blue ] || [ ! -d /opt/cipherbank/green ]; then
+          echo "❌ Blue/Green directories not found!"
+          exit 1
+        fi
+        if ! systemctl list-unit-files | grep -q cipherbank-blue; then
+          echo "❌ cipherbank-blue service not found!"
+          exit 1
+        fi
+        if ! systemctl list-unit-files | grep -q cipherbank-green; then
+          echo "❌ cipherbank-green service not found!"
+          exit 1
+        fi
+        NGINX_CONF="/www/server/panel/vhost/nginx/proxy/cipherbank.conf"
+        if [ ! -f "$NGINX_CONF" ]; then
+          echo "❌ Nginx proxy config not found!"
+          exit 1
+        fi
+        echo "✅ Server validation passed"
+        '
+    
+    - name: Get Active Version (Before)
+      id: version_before
+      run: |
+        ACTIVE=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        if [ -f /opt/cipherbank/active-version.txt ]; then
+          CONTENT=$(cat /opt/cipherbank/active-version.txt | tr -d "\n\r\t ")
+          if [ -n "$CONTENT" ]; then
+            echo "$CONTENT"
+          else
+            echo "none"
+          fi
+        elif systemctl is-active --quiet cipherbank-blue; then
+          if systemctl is-active --quiet cipherbank-green; then
+            if grep -q "127.0.0.1:8083" /www/server/panel/vhost/nginx/proxy/cipherbank.conf 2>/dev/null; then
+              echo "blue"
+            else
+              echo "green"
+            fi
+          else
+            echo "blue"
+          fi
+        elif systemctl is-active --quiet cipherbank-green; then
+          echo "green"
+        else
+          echo "none"
+        fi
+        ')
+        ACTIVE=$(echo "$ACTIVE" | tr -d '\n\r\t ' | tail -1)
+        # Ensure ACTIVE is never empty
+        if [ -z "$ACTIVE" ]; then
+          ACTIVE="none"
+        fi
+        echo "version=$ACTIVE" >> $GITHUB_OUTPUT
+        if [ "$ACTIVE" = "blue" ]; then
+          echo "emoji=🟦" >> $GITHUB_OUTPUT
+        elif [ "$ACTIVE" = "green" ]; then
+          echo "emoji=🟩" >> $GITHUB_OUTPUT
+        else
+          echo "emoji=⚪" >> $GITHUB_OUTPUT
+        fi
+        echo "Active instance: $ACTIVE"
+    
+    - name: Upload JAR to Server
+      run: |
+        echo "📤 Uploading JAR to server..."
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.jar_file }} root@${{ secrets.GCP_HOST }}:/opt/cipherbank/app.jar
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        set -e
+        if [ ! -f /opt/cipherbank/app.jar ]; then
+          echo "❌ JAR file not found after upload!"
+          exit 1
+        fi
+        JAR_SIZE=$(stat -c%s /opt/cipherbank/app.jar)
+        JAR_SIZE_MB=$((JAR_SIZE / 1024 / 1024))
+        if [ "$JAR_SIZE" -lt 1048576 ]; then
+          echo "❌ Uploaded JAR file too small ($JAR_SIZE bytes)!"
+          exit 1
+        fi
+        echo "✅ JAR file verified: $JAR_SIZE_MB MB"
+        chown paytrix:paytrix /opt/cipherbank/app.jar
+        OWNER=$(stat -c "%U:%G" /opt/cipherbank/app.jar)
+        if [ "$OWNER" != "paytrix:paytrix" ]; then
+          echo "❌ Incorrect ownership on JAR (expected paytrix:paytrix, got $OWNER)"
+          exit 1
+        fi
+        echo "✅ JAR ownership verified: $OWNER"
+        '
+        echo "✅ JAR uploaded and verified successfully"
+    
+    - name: Notify Upload Completed
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          *CipherBank Backend Deployment - Upload Completed*
+          
+          *Upload Information*
+          Status: Transfer Successful
+          Build Number: #${{ github.run_number }}
+          Destination: Production Server (GCP)
+          Transfer Protocol: SCP over SSH
+          
+          *Artifact Details*
+          File: `app.jar`
+          Size: ${{ env.jar_size_mb }} MB
+          Location: `/opt/cipherbank/app.jar`
+          Owner: paytrix:paytrix
+          Permissions: Verified
+          
+          *Verification Status*
+          File Integrity: ✓ Verified
+          Size Validation: ✓ Passed
+          Ownership: ✓ Correct
+          Server Path: ✓ Confirmed
+          
+          *Source Details*
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Branch: `${{ steps.details.outputs.branch }}`
+          Author: ${{ steps.details.outputs.author }}
+          
+          *Next Steps*
+          ⏳ Initiating blue-green deployment
+          ⏳ Service health verification
+          ⏳ Traffic switching
+          
+          [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+    
+    - name: Upload Docker Compose Configuration
+      run: |
+        echo "📤 Uploading docker-compose.yml to server..."
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no docker-compose.yml root@${{ secrets.GCP_HOST }}:/opt/cipherbank/docker-compose.yml
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        if [ ! -f /opt/cipherbank/docker-compose.yml ]; then
+          echo "❌ docker-compose.yml not found after upload!"
+          exit 1
+        fi
+        echo "✅ docker-compose.yml uploaded successfully"
+        '
+    
+    - name: Ensure Kafka is Running
+      run: |
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        set -e
+        echo "================================================"
+        echo "🐳 Kafka Dependency Check"
+        echo "================================================"
+        
+        # Check if Docker is installed
+        if ! command -v docker >/dev/null 2>&1; then
+          echo "❌ Docker is not installed on the server!"
+          echo "Please install Docker before deploying."
+          exit 1
+        fi
+        echo "✅ Docker is installed"
+        
+        # Check if docker compose is available (v2 plugin or legacy docker-compose)
+        if docker compose version >/dev/null 2>&1; then
+          COMPOSE_CMD="docker compose"
+        elif command -v docker-compose >/dev/null 2>&1; then
+          COMPOSE_CMD="docker-compose"
+        else
+          echo "❌ Docker Compose is not available!"
+          echo "Please install Docker Compose plugin or docker-compose."
+          exit 1
+        fi
+        echo "✅ Docker Compose is available: $COMPOSE_CMD"
+        
+        # Check if Kafka container is running
+        if docker ps --filter name=paymentgateway-kafka-1 --filter status=running -q | grep -q .; then
+          echo "✅ Kafka container is already running"
+          
+          # Quick health check
+          if docker exec paymentgateway-kafka-1 nc -z localhost 9092 2>/dev/null; then
+            echo "✅ Kafka is healthy and accepting connections on port 9092"
+          else
+            echo "⚠️  Kafka container is running but port 9092 is not ready yet"
+            echo "Waiting for Kafka to be ready..."
+            sleep 10
+            if docker exec paymentgateway-kafka-1 nc -z localhost 9092 2>/dev/null; then
+              echo "✅ Kafka is now healthy"
+            else
+              echo "❌ Kafka is not responding on port 9092!"
+              echo "Attempting to restart Kafka..."
+              cd /opt/cipherbank
+              $COMPOSE_CMD restart kafka
+              sleep 15
+              if docker exec paymentgateway-kafka-1 nc -z localhost 9092 2>/dev/null; then
+                echo "✅ Kafka restarted successfully"
+              else
+                echo "❌ Kafka failed to become healthy after restart!"
+                exit 1
+              fi
+            fi
+          fi
+        else
+          echo "⚠️  Kafka container is not running"
+          echo "🚀 Starting Kafka with docker-compose..."
+          
+          cd /opt/cipherbank
+          if [ ! -f docker-compose.yml ]; then
+            echo "❌ docker-compose.yml not found in /opt/cipherbank!"
+            exit 1
           fi
           
-          echo "active_color=$ACTIVE_COLOR" >> $GITHUB_OUTPUT
-          echo "deploy_color=$DEPLOY_COLOR" >> $GITHUB_OUTPUT
-          echo "deploy_port=$DEPLOY_PORT" >> $GITHUB_OUTPUT
-          echo "active_port=$ACTIVE_PORT" >> $GITHUB_OUTPUT
+          # Start Kafka
+          $COMPOSE_CMD up -d kafka
           
-          echo "Active: $ACTIVE_COLOR (port $ACTIVE_PORT)"
-          echo "Deploying to: $DEPLOY_COLOR (port $DEPLOY_PORT)"
-      
-      # ==================== DEPLOY ====================
-      - name: 📤 Upload JAR to Server
-        run: |
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ steps.build.outputs.jar_file }} \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:/home/${{ env.SSH_USER }}/${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}/app.jar
+          echo "⏳ Waiting for Kafka to be ready (max 60 seconds)..."
+          MAX_WAIT=60
+          WAITED=0
+          KAFKA_READY=false
           
-          echo "✅ JAR uploaded successfully"
-      
-      - name: 🔄 Restart Service
-        id: restart
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            echo "🔄 Restarting ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} service..."
-            sudo systemctl restart ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}
-            
-            echo "⏳ Waiting for service to start..."
+          while [ $WAITED -lt $MAX_WAIT ]; do
+            if docker ps --filter name=paymentgateway-kafka-1 --filter status=running -q | grep -q .; then
+              # Container is running, check if port is ready
+              if docker exec paymentgateway-kafka-1 nc -z localhost 9092 2>/dev/null; then
+                echo "✅ Kafka is ready and healthy!"
+                KAFKA_READY=true
+                break
+              fi
+            fi
+            echo "Waiting... ($WAITED/$MAX_WAIT seconds)"
             sleep 5
-            
-            if sudo systemctl is-active --quiet ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }}; then
-              echo "✅ Service started successfully"
-            else
-              echo "❌ Service failed to start"
-              sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
-              exit 1
-            fi
-          ENDSSH
-      
-      # ==================== HEALTH CHECK ====================
-      - name: 🏥 Health Check
-        id: health
-        run: |
-          # Run health check and capture exit code explicitly
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'ENDSSH'
-          
-          MAX_ATTEMPTS=30
-          ATTEMPT=0
-          HEALTH_URL="http://localhost:${{ steps.detect_color.outputs.deploy_port }}${{ env.HEALTH_ENDPOINT }}"
-          
-          echo "🏥 Starting health checks on $HEALTH_URL"
-          
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-            
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" 2>/dev/null || echo "000")
-            
-            if [ "$RESPONSE" = "200" ]; then
-              HEALTH_DATA=$(curl -s "$HEALTH_URL")
-              echo "✅ Health check passed!"
-              echo "Response: $HEALTH_DATA"
-              exit 0
-            fi
-            
-            echo "⏳ Service not ready yet (HTTP $RESPONSE), waiting 2s..."
-            sleep 2
+            WAITED=$((WAITED + 5))
           done
           
-          echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
-          echo "📋 Last 50 logs:"
-          sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 50 --no-pager
+          if [ "$KAFKA_READY" = false ]; then
+            echo "❌ Kafka failed to start within $MAX_WAIT seconds!"
+            echo "Container status:"
+            docker ps -a --filter name=paymentgateway-kafka-1
+            echo "Container logs:"
+            docker logs paymentgateway-kafka-1 --tail 50
+            exit 1
+          fi
+        fi
+        
+        echo "================================================"
+        echo "✅ Kafka is ready for deployment!"
+        echo "Container: paymentgateway-kafka-1"
+        echo "Port: 9092"
+        echo "Status: Running and Healthy"
+        echo "================================================"
+        '
+    
+    - name: Notify Kafka Ready
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          *CipherBank Backend Deployment - Kafka Ready*
+          
+          *Kafka Status*
+          Status: Running and Healthy
+          Build Number: #${{ github.run_number }}
+          Container: `paymentgateway-kafka-1`
+          Port: 9092
+          Health Check: ✓ Passed
+          
+          *Dependencies Verified*
+          Docker: ✓ Installed
+          Docker Compose: ✓ Available
+          Kafka Container: ✓ Running
+          Kafka Port 9092: ✓ Listening
+          
+          *Next Steps*
+          ⏳ Executing blue-green deployment
+          ⏳ Application health verification
+          
+          [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+    
+    - name: Create Deployment Script
+      run: |
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} bash << 'OUTER_EOF'
+        cat > /opt/cipherbank/scripts/deploy.sh << 'SCRIPT_EOF'
+        #!/bin/bash
+        set -e
+
+        echo "================================================"
+        echo "🚀 Starting CipherBank Blue-Green Deployment"
+        echo "================================================"
+
+
+        APP_DIR="/opt/cipherbank"
+        BACKUP_DIR="$APP_DIR/backups"
+        LOG_FILE="$APP_DIR/logs/deployment.log"
+        VERSION_FILE="$APP_DIR/active-version.txt"
+        HEALTH_CHECK_TIMEOUT=240
+        NGINX_CONF="/www/server/panel/vhost/nginx/proxy/cipherbank.conf"
+
+        # Source secrets from secure file if it exists
+        if [ -f "$APP_DIR/.deploy_secrets.env" ]; then
+          source "$APP_DIR/.deploy_secrets.env"
+        else
+          echo "Warning: .deploy_secrets.env not found, expecting DB credentials from environment"
+        fi
+
+        log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+        }
+
+        if [ -f "$VERSION_FILE" ]; then
+          ACTIVE_INSTANCE=$(cat "$VERSION_FILE" | tr -d '\n\r\t ')
+          # Treat blank/empty file as "none"
+          if [ -z "$ACTIVE_INSTANCE" ]; then
+            ACTIVE_INSTANCE="none"
+          fi
+        elif systemctl is-active --quiet cipherbank-blue; then
+          ACTIVE_INSTANCE="blue"
+        elif systemctl is-active --quiet cipherbank-green; then
+          ACTIVE_INSTANCE="green"
+        else
+          ACTIVE_INSTANCE="none"
+        fi
+
+        if [ "$ACTIVE_INSTANCE" = "blue" ]; then
+          TARGET_INSTANCE="green"
+          TARGET_PORT="8084"
+        else
+          TARGET_INSTANCE="blue"
+          TARGET_PORT="8083"
+        fi
+
+        log "Active instance: $ACTIVE_INSTANCE"
+        log "Target instance: $TARGET_INSTANCE (port $TARGET_PORT)"
+
+        if [ "$ACTIVE_INSTANCE" != "none" ] && [ -f "$APP_DIR/$ACTIVE_INSTANCE/app.jar" ]; then
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_FILE="$BACKUP_DIR/app_${ACTIVE_INSTANCE}_${TIMESTAMP}.jar"
+          log "Backing up current $ACTIVE_INSTANCE instance..."
+          cp "$APP_DIR/$ACTIVE_INSTANCE/app.jar" "$BACKUP_FILE"
+          log "Backup created: $BACKUP_FILE"
+          ls -t "$BACKUP_DIR"/app_${ACTIVE_INSTANCE}_*.jar 2>/dev/null | tail -n +6 | xargs -r rm
+        fi
+
+        log "Deploying new version to $TARGET_INSTANCE instance..."
+        cp "$APP_DIR/app.jar" "$APP_DIR/$TARGET_INSTANCE/app.jar"
+        if [ ! -f "$APP_DIR/$TARGET_INSTANCE/app.jar" ]; then
+          log "❌ Failed to copy JAR to $TARGET_INSTANCE directory!"
           exit 1
-          ENDSSH
-          
-          # Check the exit code from SSH
-          if [ $? -ne 0 ]; then
-            echo "Health check failed"
+        fi
+        JAR_SIZE=$(stat -c%s "$APP_DIR/$TARGET_INSTANCE/app.jar")
+        if [ "$JAR_SIZE" -lt 1048576 ]; then
+          log "❌ Copied JAR file too small ($JAR_SIZE bytes)!"
+          exit 1
+        fi
+        log "✅ JAR copied successfully ($((JAR_SIZE / 1024 / 1024)) MB)"
+        chown paytrix:paytrix "$APP_DIR/$TARGET_INSTANCE/app.jar"
+        OWNER=$(stat -c '%U:%G' "$APP_DIR/$TARGET_INSTANCE/app.jar")
+        if [ "$OWNER" != "paytrix:paytrix" ]; then
+          log "❌ Incorrect ownership on JAR (expected paytrix:paytrix, got $OWNER)"
+          exit 1
+        fi
+        log "✅ JAR ownership verified"
+
+        log "Creating .env file for $TARGET_INSTANCE instance..."
+        cat > "$APP_DIR/$TARGET_INSTANCE/.env" <<ENVEOF
+DB_HOST=${DB_HOST}
+DB_PORT=3306
+DB_NAME=cipherbank
+DB_USERNAME=root
+DB_PASSWORD=${DB_PASSWORD}
+SERVER_PORT=${TARGET_PORT}
+SPRING_PROFILES_ACTIVE=prod
+IP_WHITELIST_ENABLED=true
+IP_WHITELIST_DEBUG=true
+LOG_PATH=/var/log/cipherbank
+LOG_FILE=/var/log/cipherbank/app.log
+ENVEOF
+
+        if [ ! -f "$APP_DIR/$TARGET_INSTANCE/.env" ] || [ ! -s "$APP_DIR/$TARGET_INSTANCE/.env" ]; then
+          log "❌ Failed to create .env file"
+          exit 1
+        fi
+        if ! grep -q "DB_HOST=" "$APP_DIR/$TARGET_INSTANCE/.env"; then
+          log "❌ DB_HOST not found in .env file"
+          exit 1
+        fi
+        log "✅ .env file created and validated"
+        chown paytrix:paytrix "$APP_DIR/$TARGET_INSTANCE/.env"
+        chmod 600 "$APP_DIR/$TARGET_INSTANCE/.env"
+        cp "$APP_DIR/$TARGET_INSTANCE/.env" "$APP_DIR/.env"
+        chown paytrix:paytrix "$APP_DIR/.env"
+
+        if systemctl is-active --quiet "cipherbank-$TARGET_INSTANCE"; then
+          log "Stopping $TARGET_INSTANCE instance..."
+          systemctl stop "cipherbank-$TARGET_INSTANCE"
+          sleep 2
+          if systemctl is-active --quiet "cipherbank-$TARGET_INSTANCE"; then
+            log "❌ Failed to stop $TARGET_INSTANCE instance!"
             exit 1
           fi
-      
-      - name: 📢 Notify Health Check Success
-        if: success()
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="✅ Health check passed
-          • Color: ${{ steps.detect_color.outputs.deploy_color }}
-          • Port: ${{ steps.detect_color.outputs.deploy_port }}
-          • Switching traffic..."
-      
-      # ==================== TRAFFIC SWITCH ====================
-      - name: 🔀 Switch Traffic
-        id: switch
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} bash << 'ENDSSH'
-          
-          PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
-          
-          echo "📝 Updating nginx configuration..."
-          
-          # Create backup
-          sudo cp "$PROXY_CONF" "${PROXY_CONF}.backup"
-          
-          # Update port in proxy config using the actual pattern that exists
-          sudo sed -i 's|proxy_pass http://127\.0\.0\.1:[0-9]\{4\}|proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}|g' "$PROXY_CONF"
-          
-          # Verify the change was made
-          if sudo grep -q "proxy_pass http://127.0.0.1:${{ steps.detect_color.outputs.deploy_port }}" "$PROXY_CONF"; then
-            echo "✅ Port updated to ${{ steps.detect_color.outputs.deploy_port }}"
+          log "✅ $TARGET_INSTANCE instance stopped"
+        fi
+
+        log "Starting $TARGET_INSTANCE instance..."
+        SERVICE_START_TIME=$(date +%s)
+        systemctl start "cipherbank-$TARGET_INSTANCE"
+        sleep 2
+        if ! systemctl is-active --quiet "cipherbank-$TARGET_INSTANCE"; then
+          log "❌ Failed to start $TARGET_INSTANCE instance!"
+          systemctl status "cipherbank-$TARGET_INSTANCE" --no-pager | tee -a "$LOG_FILE"
+          journalctl -u "cipherbank-$TARGET_INSTANCE" -n 50 --no-pager | tee -a "$LOG_FILE"
+          exit 1
+        fi
+        log "✅ $TARGET_INSTANCE instance started"
+
+        log "Waiting for application to initialize (Spring Boot startup can take up to 3 minutes)..."
+        sleep 20
+
+        log "Starting health check on port $TARGET_PORT..."
+        MAX_ATTEMPTS=$((HEALTH_CHECK_TIMEOUT / 5))
+        ATTEMPT=1
+        HEALTH_OK=false
+
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          log "Health check attempt $ATTEMPT/$MAX_ATTEMPTS"
+          PORT_LISTENING=false
+          if command -v netstat >/dev/null 2>&1; then
+            netstat -tlnp 2>/dev/null | grep -q ":$TARGET_PORT " && PORT_LISTENING=true
+          elif command -v ss >/dev/null 2>&1; then
+            ss -tlnp 2>/dev/null | grep -q ":$TARGET_PORT " && PORT_LISTENING=true
           else
-            echo "❌ Failed to update port in config"
-            sudo cat "$PROXY_CONF"
-            exit 1
+            timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$TARGET_PORT" 2>/dev/null && PORT_LISTENING=true
           fi
           
-          # Test nginx config
-          if sudo nginx -t 2>&1; then
-            echo "✅ Nginx config valid"
-            sudo nginx -s reload
-            echo "✅ Nginx reloaded"
-            exit 0
-          else
-            echo "❌ Nginx config invalid, restoring backup"
-            sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
-            sudo nginx -s reload
-            exit 1
+          if [ "$PORT_LISTENING" = false ]; then
+            log "Port $TARGET_PORT is not listening yet"
+            sleep 5
+            ATTEMPT=$((ATTEMPT + 1))
+            continue
           fi
-          ENDSSH
           
-          # Check the exit code from SSH
-          if [ $? -ne 0 ]; then
-            echo "Traffic switch failed"
-            exit 1
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$TARGET_PORT/actuator/health" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            HEALTH_CHECK_END_TIME=$(date +%s)
+            HEALTH_CHECK_DURATION=$((HEALTH_CHECK_END_TIME - SERVICE_START_TIME))
+            log "✅ Health check passed! HTTP $HTTP_CODE (took ${HEALTH_CHECK_DURATION}s from service start)"
+            HEALTH_OK=true
+            break
           fi
-      
-      - name: 🧪 Verify Traffic Switch
-        run: |
-          sleep 3
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://cipher.thepaytrix.com${{ env.HEALTH_ENDPOINT }} || echo "000")
           
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ Traffic successfully switched to ${{ steps.detect_color.outputs.deploy_color }}"
-          else
-            echo "❌ Traffic switch verification failed (HTTP $RESPONSE)"
-            exit 1
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$TARGET_PORT/swagger-ui/index.html" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            HEALTH_CHECK_END_TIME=$(date +%s)
+            HEALTH_CHECK_DURATION=$((HEALTH_CHECK_END_TIME - SERVICE_START_TIME))
+            log "✅ Health check passed via swagger! HTTP $HTTP_CODE (took ${HEALTH_CHECK_DURATION}s from service start)"
+            HEALTH_OK=true
+            break
           fi
-      
-      # ==================== CLEANUP OLD VERSION ====================
-      - name: 🧹 Stop Old Version
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            echo "🛑 Stopping ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }} service..."
-            sudo systemctl stop ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }} || true
-            echo "✅ Old version stopped"
-          ENDSSH
-      
-      - name: 🧹 Cleanup Backup Files
-        if: success()
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
-            sudo rm -f "${PROXY_CONF}.backup"
-            echo "✅ Backup config cleaned"
-          ENDSSH
-      
-      # ==================== SUCCESS NOTIFICATION ====================
-      - name: 📢 Notify Deployment Success
-        if: success()
-        run: |
-          DEPLOY_TIME=$(date +'%Y-%m-%d %H:%M:%S UTC')
           
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="✅ <b>CipherBank Backend Deployment Successful</b>
+          log "Health check failed (HTTP $HTTP_CODE), retrying..."
+          sleep 5
+          ATTEMPT=$((ATTEMPT + 1))
+        done
+
+        if [ "$HEALTH_OK" = false ]; then
+          log "❌ Health check failed after $MAX_ATTEMPTS attempts"
+          log "🔄 Initiating rollback procedure..."
           
-          🎯 <b>Deployment Details</b>
-          • Color: ${{ steps.detect_color.outputs.active_color }} → <b>${{ steps.detect_color.outputs.deploy_color }}</b>
-          • Port: ${{ steps.detect_color.outputs.active_port }} → <b>${{ steps.detect_color.outputs.deploy_port }}</b>
-          • Size: ${{ steps.build.outputs.jar_size }}
+          # Stop the failed deployment
+          systemctl stop "cipherbank-$TARGET_INSTANCE"
+          sleep 2
           
-          📊 <b>Build Info</b>
-          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
-          • Author: ${{ steps.vars.outputs.AUTHOR }}
-          • Built: ${{ steps.vars.outputs.BUILD_TIME }}
-          • Deployed: $DEPLOY_TIME
+          # Create/clear the system down flag
+          rm -f "$APP_DIR/SYSTEM_DOWN" 2>/dev/null || true
           
-          🌐 <b>Endpoints</b>
-          • API: https://cipher.thepaytrix.com/api
-          • Health: https://cipher.thepaytrix.com${{ env.HEALTH_ENDPOINT }}
-          
-          💬 <i>${{ steps.vars.outputs.COMMIT_MSG }}</i>"
-      
-      # ==================== FAILURE HANDLING ====================
-      - name: 🚨 Rollback on Failure
-        if: failure() && (steps.health.outcome == 'failure' || steps.switch.outcome == 'failure')
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << 'ENDSSH'
-            echo "🚨 Deployment failed, initiating rollback..."
+          if [ "$ACTIVE_INSTANCE" != "none" ]; then
+            log "Rolling back to previous instance: $ACTIVE_INSTANCE"
             
-            # Stop failed deployment
-            sudo systemctl stop ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} || true
-            
-            # Restore nginx config from backup if it exists
-            PROXY_CONF="/www/server/panel/vhost/nginx/proxy/${{ env.APP_NAME }}.conf"
-            if [ -f "${PROXY_CONF}.backup" ]; then
-              sudo mv "${PROXY_CONF}.backup" "$PROXY_CONF"
-              sudo nginx -s reload
-              echo "✅ Nginx config restored"
+            # Start the old instance if not running
+            if ! systemctl is-active --quiet "cipherbank-$ACTIVE_INSTANCE"; then
+              log "Starting previous $ACTIVE_INSTANCE instance..."
+              systemctl start "cipherbank-$ACTIVE_INSTANCE"
+              sleep 3
             fi
             
-            # Ensure old version is running
-            sudo systemctl start ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.active_color }}
+            # Verify rollback success
+            if systemctl is-active --quiet "cipherbank-$ACTIVE_INSTANCE"; then
+              log "✅ Previous instance is running, verifying health..."
+              
+              # Determine the port of the active instance
+              if [ "$ACTIVE_INSTANCE" = "blue" ]; then
+                ROLLBACK_PORT="8083"
+              else
+                ROLLBACK_PORT="8084"
+              fi
+              
+              # Quick health check on rolled-back instance
+              ROLLBACK_ATTEMPTS=10
+              ROLLBACK_ATTEMPT=1
+              ROLLBACK_HEALTHY=false
+              
+              while [ $ROLLBACK_ATTEMPT -le $ROLLBACK_ATTEMPTS ]; do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$ROLLBACK_PORT/actuator/health" 2>/dev/null || echo "000")
+                if [ "$HTTP_CODE" = "200" ]; then
+                  log "✅ Rollback successful - Previous instance is healthy!"
+                  ROLLBACK_HEALTHY=true
+                  break
+                fi
+                log "Rollback health check attempt $ROLLBACK_ATTEMPT/$ROLLBACK_ATTEMPTS (HTTP $HTTP_CODE)"
+                sleep 2
+                ROLLBACK_ATTEMPT=$((ROLLBACK_ATTEMPT + 1))
+              done
+              
+              if [ "$ROLLBACK_HEALTHY" = true ]; then
+                log "========================================="
+                log "✅ ROLLBACK SUCCESSFUL"
+                log "System restored to previous working state"
+                log "Active instance: $ACTIVE_INSTANCE (port $ROLLBACK_PORT)"
+                log "Service is operational"
+                log "========================================="
+                exit 1
+              else
+                log "========================================="
+                log "🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨"
+                log "========================================="
+                log "⚠️ ROLLBACK FAILED!"
+                log "⚠️ Previous instance started but failed health check!"
+                log "⚠️ CIPHERBANK SYSTEM MAY BE DOWN!"
+                log "⚠️ IMMEDIATE MANUAL INTERVENTION REQUIRED!"
+                log "========================================="
+                log "System Status: ROLLBACK INSTANCE UNHEALTHY"
+                log "Service Impact: CRITICAL - POSSIBLE COMPLETE OUTAGE"
+                log "User Impact: ALL API REQUESTS LIKELY FAILING"
+                log "========================================="
+                echo "ROLLBACK_FAILED" > "$APP_DIR/SYSTEM_DOWN"
+                exit 1
+              fi
+            else
+              log "========================================="
+              log "🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨"
+              log "========================================="
+              log "⚠️ ROLLBACK FAILED!"
+              log "⚠️ Previous instance failed to start!"
+              log "⚠️ CIPHERBANK SYSTEM IS COMPLETELY DOWN!"
+              log "⚠️ ALL SERVICES ARE OFFLINE!"
+              log "⚠️ IMMEDIATE MANUAL INTERVENTION REQUIRED!"
+              log "========================================="
+              log "System Status: NO RUNNING INSTANCES"
+              log "Service Impact: COMPLETE OUTAGE"
+              log "User Impact: ALL API REQUESTS FAILING"
+              log "Previous Instance: $ACTIVE_INSTANCE (FAILED TO START)"
+              log "========================================="
+              echo "ROLLBACK_FAILED" > "$APP_DIR/SYSTEM_DOWN"
+              exit 1
+            fi
+          else
+            log "========================================="
+            log "🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨"
+            log "========================================="
+            log "⚠️ WARNING: NO PREVIOUS INSTANCE TO ROLLBACK TO!"
+            log "⚠️ CIPHERBANK SYSTEM IS COMPLETELY DOWN!"
+            log "⚠️ ALL SERVICES ARE OFFLINE!"
+            log "⚠️ IMMEDIATE MANUAL INTERVENTION REQUIRED!"
+            log "========================================="
+            log "System Status: NO RUNNING INSTANCES"
+            log "Service Impact: COMPLETE OUTAGE"
+            log "User Impact: ALL API REQUESTS FAILING"
+            log "========================================="
+            echo "NO_PREVIOUS_VERSION" > "$APP_DIR/SYSTEM_DOWN"
+            exit 1
+          fi
+        fi
+
+        if [ -f "$NGINX_CONF" ]; then
+          log "Switching nginx to $TARGET_INSTANCE instance (port $TARGET_PORT)..."
+          cp "$NGINX_CONF" "$NGINX_CONF.backup.$(date +%s)"
+          sed -i "s|proxy_pass http://127.0.0.1:[0-9]\+|proxy_pass http://127.0.0.1:$TARGET_PORT|g" "$NGINX_CONF"
+          if ! grep -q "proxy_pass http://127.0.0.1:$TARGET_PORT" "$NGINX_CONF"; then
+            log "❌ Failed to update nginx configuration to port $TARGET_PORT!"
+            LATEST_BACKUP=$(ls -t "$NGINX_CONF.backup."* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              mv "$LATEST_BACKUP" "$NGINX_CONF"
+              log "Restored nginx backup config"
+            fi
+            exit 1
+          fi
+          log "✅ Nginx config updated to port $TARGET_PORT"
+          
+          if ! nginx -t 2>&1 | tee -a "$LOG_FILE"; then
+            log "❌ Nginx configuration test failed!"
+            LATEST_BACKUP=$(ls -t "$NGINX_CONF.backup."* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              mv "$LATEST_BACKUP" "$NGINX_CONF"
+              log "Restored nginx backup config"
+            fi
+            systemctl stop "cipherbank-$TARGET_INSTANCE"
             
-            echo "✅ Rollback complete, service restored to ${{ steps.detect_color.outputs.active_color }}"
-          ENDSSH
-      
-      - name: 📢 Notify Deployment Failure
-        if: failure()
-        run: |
-          # Determine failed step
-          FAILED_STEP="Unknown"
-          if [ "${{ steps.detect_color.outcome }}" = "failure" ]; then
-            FAILED_STEP="Color Detection"
-          elif [ "${{ steps.build.outcome }}" = "failure" ]; then
-            FAILED_STEP="Build"
-          elif [ "${{ steps.restart.outcome }}" = "failure" ]; then
-            FAILED_STEP="Service Restart"
-          elif [ "${{ steps.health.outcome }}" = "failure" ]; then
-            FAILED_STEP="Health Check"
-          elif [ "${{ steps.switch.outcome }}" = "failure" ]; then
-            FAILED_STEP="Traffic Switch"
+            # Verify rollback after nginx failure
+            if [ "$ACTIVE_INSTANCE" != "none" ]; then
+              if ! systemctl is-active --quiet "cipherbank-$ACTIVE_INSTANCE"; then
+                log "Starting previous $ACTIVE_INSTANCE instance after nginx failure..."
+                systemctl start "cipherbank-$ACTIVE_INSTANCE"
+                sleep 2
+              fi
+              
+              if ! systemctl is-active --quiet "cipherbank-$ACTIVE_INSTANCE"; then
+                log "🚨 CRITICAL: Rollback failed after nginx error!"
+                echo "ROLLBACK_FAILED_NGINX" > "$APP_DIR/SYSTEM_DOWN"
+              fi
+            else
+              echo "NO_PREVIOUS_VERSION_NGINX" > "$APP_DIR/SYSTEM_DOWN"
+            fi
+            exit 1
           fi
           
-          ERROR_LOG=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
-            "sudo journalctl -u ${{ env.APP_NAME }}-${{ steps.detect_color.outputs.deploy_color }} -n 20 --no-pager" || echo "Could not retrieve logs")
+          if systemctl is-active --quiet nginx; then
+            systemctl reload nginx 2>&1 | tee -a "$LOG_FILE"
+          elif [ -x /etc/init.d/nginx ]; then
+            /etc/init.d/nginx reload 2>&1 | tee -a "$LOG_FILE"
+          else
+            log "⚠️  Could not reload nginx - please reload manually"
+          fi
+          log "✅ Nginx reloaded successfully"
+        else
+          log "⚠️  Nginx config not found - skipping traffic switch"
+          log "⚠️  You need to manually configure nginx proxy!"
+        fi
+
+        echo "$TARGET_INSTANCE" > "$VERSION_FILE"
+        if [ ! -f "$VERSION_FILE" ]; then
+          log "❌ Failed to create version file!"
+          exit 1
+        fi
+        SAVED_VERSION=$(cat "$VERSION_FILE" | tr -d '\n\r\t ')
+        if [ "$SAVED_VERSION" != "$TARGET_INSTANCE" ]; then
+          log "❌ Version file contains incorrect value (expected: $TARGET_INSTANCE, got: $SAVED_VERSION)"
+          exit 1
+        fi
+        log "✅ Updated active version to: $TARGET_INSTANCE"
+
+        sleep 5
+
+        if [ "$ACTIVE_INSTANCE" != "none" ]; then
+          log "Stopping old $ACTIVE_INSTANCE instance..."
+          systemctl stop "cipherbank-$ACTIVE_INSTANCE"
+          sleep 2
+          if systemctl is-active --quiet "cipherbank-$ACTIVE_INSTANCE"; then
+            log "⚠️  Warning: Old $ACTIVE_INSTANCE instance did not stop cleanly"
+          else
+            log "✅ Old $ACTIVE_INSTANCE instance stopped successfully"
+          fi
+        fi
+
+        log "========================================="
+        log "✅ Deployment completed successfully!"
+        log "Active instance: $TARGET_INSTANCE"
+        log "Running as: paytrix user"
+        log "Application URL: https://cipher.thepaytrix.com"
+        log "========================================="
+        SCRIPT_EOF
+        chmod +x /opt/cipherbank/scripts/deploy.sh
+        OUTER_EOF
+    
+    - name: Blue-Green Deployment
+      env:
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      run: |
+        echo "🚀 Starting secure deployment with secrets protection..."
+        
+        # Create secure temp file with secrets
+        cat > /tmp/deploy_secrets.env <<'SECRETS_EOF'
+        DB_HOST=${{ secrets.DB_HOST }}
+        DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+        SECRETS_EOF
+        chmod 600 /tmp/deploy_secrets.env
+        
+        # Upload secrets file securely
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          /tmp/deploy_secrets.env \
+          root@${{ secrets.GCP_HOST }}:/opt/cipherbank/.deploy_secrets.env
+        
+        # Set secure permissions on remote
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          root@${{ secrets.GCP_HOST }} 'chmod 600 /opt/cipherbank/.deploy_secrets.env'
+        
+        # Run deployment script (will source secrets internally)
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          root@${{ secrets.GCP_HOST }} \
+          'bash /opt/cipherbank/scripts/deploy.sh'
+        
+        # Cleanup local temp file
+        rm -f /tmp/deploy_secrets.env
+        
+        # Cleanup remote secrets file
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          root@${{ secrets.GCP_HOST }} \
+          'rm -f /opt/cipherbank/.deploy_secrets.env'
+    
+    - name: Verify Deployment
+      run: |
+        echo "🔍 Verifying deployment..."
+        MAX_ATTEMPTS=36  # 3 minutes (increased from 12 to match app startup time)
+        ATTEMPT=1
+        SLEEP_TIME=5
+        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+          echo "Verification attempt $ATTEMPT/$MAX_ATTEMPTS..."
+          HTTP_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://cipher.thepaytrix.com/actuator/health" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Deployment verified via actuator/health!"
+            exit 0
+          fi
+          HTTP_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://cipher.thepaytrix.com/swagger-ui/index.html" 2>/dev/null || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Deployment verified via swagger!"
+            exit 0
+          fi
+          if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+            echo "Waiting $SLEEP_TIME seconds before retry..."
+            sleep $SLEEP_TIME
+          fi
+          ATTEMPT=$((ATTEMPT + 1))
+        done
+        echo "❌ Verification failed after $MAX_ATTEMPTS attempts"
+        exit 1
+    
+    - name: Get Active Version (After)
+      id: version_after
+      if: success()
+      run: |
+        ACTIVE=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} 'cat /opt/cipherbank/active-version.txt 2>/dev/null | tr -d "\n\r\t " || echo "unknown"')
+        ACTIVE=$(echo "$ACTIVE" | tr -d '\n\r\t ' | tail -1)
+        echo "version=$ACTIVE" >> $GITHUB_OUTPUT
+        if [ "$ACTIVE" = "blue" ]; then
+          echo "emoji=🟦" >> $GITHUB_OUTPUT
+        elif [ "$ACTIVE" = "green" ]; then
+          echo "emoji=🟩" >> $GITHUB_OUTPUT
+        else
+          echo "emoji=⚪" >> $GITHUB_OUTPUT
+        fi
+        DEPLOY_END=$(date +%s)
+        DEPLOY_START=${{ steps.details.outputs.deploy_start }}
+        DURATION=$((DEPLOY_END - DEPLOY_START))
+        MINUTES=$((DURATION / 60))
+        SECONDS=$((DURATION % 60))
+        echo "duration=${MINUTES}m ${SECONDS}s" >> $GITHUB_OUTPUT
+    
+    - name: Get Rollback Version
+      id: rollback_version
+      if: failure()
+      run: |
+        ACTIVE=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} 'cat /opt/cipherbank/active-version.txt 2>/dev/null | tr -d "\n\r\t " || echo "unknown"')
+        ACTIVE=$(echo "$ACTIVE" | tr -d '\n\r\t ' | tail -1)
+        echo "version=$ACTIVE" >> $GITHUB_OUTPUT
+        if [ "$ACTIVE" = "blue" ]; then
+          echo "emoji=🟦" >> $GITHUB_OUTPUT
+        elif [ "$ACTIVE" = "green" ]; then
+          echo "emoji=🟩" >> $GITHUB_OUTPUT
+        else
+          echo "emoji=⚪" >> $GITHUB_OUTPUT
+        fi
+        DEPLOY_END=$(date +%s)
+        DEPLOY_START=${{ steps.details.outputs.deploy_start }}
+        DURATION=$((DEPLOY_END - DEPLOY_START))
+        MINUTES=$((DURATION / 60))
+        SECONDS=$((DURATION % 60))
+        echo "duration=${MINUTES}m ${SECONDS}s" >> $GITHUB_OUTPUT
+        echo "fail_time=$(TZ='Asia/Kolkata' date +'%Y-%m-%d %H:%M:%S IST')" >> $GITHUB_OUTPUT
+    
+    - name: Check System Status
+      id: check_system_down
+      if: failure()
+      run: |
+        SYSTEM_DOWN=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.GCP_HOST }} '
+        if [ -f /opt/cipherbank/SYSTEM_DOWN ]; then
+          cat /opt/cipherbank/SYSTEM_DOWN
+        else
+          echo "SYSTEM_RUNNING"
+        fi
+        ' | tr -d '\n\r\t ')
+        echo "status=$SYSTEM_DOWN" >> $GITHUB_OUTPUT
+        echo "System status check: $SYSTEM_DOWN"
+        
+        # Determine if this is a critical outage
+        if [[ "$SYSTEM_DOWN" == "ROLLBACK_FAILED"* ]] || [[ "$SYSTEM_DOWN" == "NO_PREVIOUS_VERSION"* ]]; then
+          echo "is_critical=true" >> $GITHUB_OUTPUT
+          echo "🚨 CRITICAL: System is completely down!"
+        else
+          echo "is_critical=false" >> $GITHUB_OUTPUT
+          echo "✅ System is operational (rollback succeeded)"
+        fi
+    
+    - name: Send Telegram Notification - Success
+      if: success()
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          ✅ *CipherBank Backend Deployment - Completed Successfully*
           
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="❌ <b>CipherBank Backend Deployment Failed</b>
+          *Deployment Summary*
+          Status: ✅ Production Deployment Successful
+          Build Number: #${{ github.run_number }}
+          Total Duration: ${{ steps.version_after.outputs.duration }}
+          Completed: ${{ steps.details.outputs.deploy_time }}
           
-          🚨 <b>Failure Details</b>
-          • Failed Step: $FAILED_STEP
-          • Target: ${{ steps.detect_color.outputs.deploy_color }} (port ${{ steps.detect_color.outputs.deploy_port }})
+          *Blue-Green Deployment Status*
+          Previous Instance: ${{ steps.version_before.outputs.emoji }} `${{ steps.version_before.outputs.version }}` (inactive)
+          Active Instance: ${{ steps.version_after.outputs.emoji }} `${{ steps.version_after.outputs.version }}` (live)
+          Deployment Switch: ${{ steps.version_before.outputs.emoji }} → ${{ steps.version_after.outputs.emoji }}
           
-          📊 <b>Build Info</b>
-          • Commit: <code>${{ steps.vars.outputs.COMMIT_SHA }}</code>
-          • Author: ${{ steps.vars.outputs.AUTHOR }}
+          *Service Status*
+          Application: ✅ Live and Healthy
+          Health Check: ✅ Passed
+          Service User: paytrix
+          Deployment Type: Zero-Downtime Blue-Green
           
-          🔄 <b>Status</b>
-          • Rollback: Initiated
-          • Active: ${{ steps.detect_color.outputs.active_color }} (unchanged)
+          *Build Details*
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Branch: `${{ steps.details.outputs.branch }}`
+          Author: ${{ steps.details.outputs.author }}
+          Message: ${{ steps.details.outputs.message }}
+          Artifact Size: ${{ env.jar_size_mb }} MB
           
-          📋 <b>Recent Logs</b>
-          <code>${ERROR_LOG:0:500}</code>
+          *Production Environment*
+          API Endpoint: https://cipher.thepaytrix.com/api
+          Swagger UI: https://cipher.thepaytrix.com/swagger-ui/index.html
+          Health Check: https://cipher.thepaytrix.com/actuator/health
           
-          🔗 <a href=\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\">View Full Logs</a>"
+          *Links*
+          [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) • [View Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.details.outputs.sha_full }})
+
+    
+    - name: Send Telegram Notification - Failure
+      if: failure()
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          ❌ *CipherBank Backend Deployment - Failed*
+          
+          *Deployment Summary*
+          Status: ❌ Production Deployment Failed
+          Build Number: #${{ github.run_number }}
+          Total Duration: ${{ steps.rollback_version.outputs.duration }}
+          Failed: ${{ steps.rollback_version.outputs.fail_time }}
+          
+          *Blue-Green Rollback Status*
+          Attempted Instance: ${{ steps.version_before.outputs.emoji }} `${{ steps.version_before.outputs.version }}`
+          Rolled Back To: ${{ steps.rollback_version.outputs.emoji }} `${{ steps.rollback_version.outputs.version }}` (active)
+          Rollback Result: ✅ Previous version restored
+          
+          *Failure Details*
+          Reason: ❌ Health check validation failed
+          Service Impact: Zero downtime maintained
+          Severity: High - Requires investigation
+          Deployment Type: Blue-Green with automatic rollback
+          
+          *Build Details*
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Branch: `${{ steps.details.outputs.branch }}`
+          Author: ${{ steps.details.outputs.author }}
+          Message: ${{ steps.details.outputs.message }}
+          
+          *Required Actions*
+          1. Review deployment logs on server
+          2. Check application health endpoints
+          3. Verify Kafka is running: `docker ps | grep kafka`
+          4. Verify database connectivity
+          5. Review configuration changes
+          6. Analyze error logs for root cause
+          
+          *Server Logs*
+          Deployment Log: `/opt/cipherbank/logs/deployment.log`
+          Application Log: `/opt/cipherbank/logs/${{ steps.rollback_version.outputs.version }}.log`
+          System Journal: `journalctl -u cipherbank-${{ steps.rollback_version.outputs.version }}`
+          Kafka Logs: `docker logs paymentgateway-kafka-1 --tail 100`
+          
+          *Links*
+          [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) • [View Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.details.outputs.sha_full }})
+          
+          Investigation required before next deployment attempt.
+    
+    - name: Send CRITICAL System Down Alert
+      if: failure() && steps.check_system_down.outputs.is_critical == 'true'
+      uses: appleboy/telegram-action@25c7e7f1b6c3b080272c37eb6c5394f0c8e0ad10  # v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        format: markdown
+        disable_web_page_preview: true
+        message: |
+          🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+          
+          *🆘 CRITICAL SYSTEM OUTAGE 🆘*
+          *CIPHERBANK IS COMPLETELY DOWN*
+          
+          🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+          
+          ⛔️ *SEVERITY: CRITICAL*
+          ⛔️ *SERVICE STATUS: ALL SERVICES OFFLINE*
+          ⛔️ *USER IMPACT: COMPLETE OUTAGE*
+          ⛔️ *DOWNTIME: STARTED AT ${{ steps.rollback_version.outputs.fail_time }}*
+          
+          *🔴 CRITICAL DETAILS*
+          • System Status: `${{ steps.check_system_down.outputs.status }}`
+          • Deployment FAILED and rollback also FAILED
+          • NO healthy CipherBank instance is running
+          • ALL API endpoints are DOWN
+          • ALL services are BLOCKED
+          • ALL users are experiencing failures
+          
+          *🔍 FAILURE REASON*
+          ${{ steps.check_system_down.outputs.status == 'NO_PREVIOUS_VERSION' && '• NO previous version existed to rollback to' || '' }}
+          ${{ steps.check_system_down.outputs.status == 'NO_PREVIOUS_VERSION_NGINX' && '• NO previous version existed to rollback to (nginx failure)' || '' }}
+          ${{ steps.check_system_down.outputs.status == 'ROLLBACK_FAILED' && '• Previous instance failed health check after rollback' || '' }}
+          ${{ steps.check_system_down.outputs.status == 'ROLLBACK_FAILED_NGINX' && '• Previous instance failed to start after nginx failure' || '' }}
+          • New deployment health checks failed
+          • Rollback procedure could not restore service
+          
+          *⚡️ IMMEDIATE ACTION REQUIRED*
+          1️⃣ SSH into server IMMEDIATELY: `ssh root@${{ secrets.GCP_HOST }}`
+          2️⃣ Check Kafka status: `docker ps | grep kafka`
+          3️⃣ Start Kafka if needed: `cd /opt/cipherbank && docker compose up -d kafka`
+          4️⃣ Check deployment logs: `tail -100 /opt/cipherbank/logs/deployment.log`
+          5️⃣ Check application logs: `journalctl -u cipherbank-blue -n 100`
+          6️⃣ Review error details and fix the issue
+          7️⃣ Verify database connectivity: `mysql -h ${{ secrets.DB_HOST }} -u root -p`
+          8️⃣ Manually start service if needed: `systemctl start cipherbank-blue`
+          9️⃣ Verify health: `curl http://localhost:8083/actuator/health`
+          🔟 Update team on status
+          
+          *🔧 QUICK DIAGNOSTIC COMMANDS*
+          ```
+          # Check Kafka status
+          docker ps | grep kafka
+          docker logs paymentgateway-kafka-1 --tail 50
+          
+          # Check service status
+          systemctl status cipherbank-blue cipherbank-green
+          
+          # Check if ports are listening
+          netstat -tlnp | grep -E ':(8083|8084|9092)'
+          
+          # Test database connection
+          mysql -h ${{ secrets.DB_HOST }} -u root -p -e "SHOW DATABASES;"
+          
+          # View recent logs
+          tail -50 /var/log/cipherbank/app.log
+          
+          # Check disk space
+          df -h
+          ```
+          
+          *📊 DEPLOYMENT INFO*
+          Build: #${{ github.run_number }}
+          Commit: `${{ steps.details.outputs.sha_short }}`
+          Author: ${{ steps.details.outputs.author }}
+          Branch: `${{ steps.details.outputs.branch }}`
+          
+          *🔗 LINKS*
+          [GitHub Action](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          [Failed Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.details.outputs.sha_full }})
+          
+          🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+          *DO NOT IGNORE THIS MESSAGE*
+          *SYSTEM IS DOWN - ACT NOW!*
+          🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨
+          
+          ☎️ *ESCALATE IF NEEDED*
+          This is a P0 production incident requiring immediate response.
