@@ -294,7 +294,7 @@ jobs:
         NGINX_CONF="/www/server/panel/vhost/nginx/proxy/cipherbank.conf"
         if [ ! -f "$NGINX_CONF" ]; then
           echo "📝 Creating nginx proxy configuration..."
-          cat > "$NGINX_CONF" <<'"'"'NGINXEOF'"'"'
+          cat > "$NGINX_CONF" <<'EOF'
 # CipherBank Backend Proxy Configuration
 # Auto-managed by GitHub Actions deployment workflow
 # Ports: 8083 (blue), 8084 (green)
@@ -344,7 +344,7 @@ location /actuator/ {
     proxy_set_header X-Forwarded-Proto $scheme;
     access_log off;
 }
-NGINXEOF
+EOF
           if [ ! -f "$NGINX_CONF" ] || [ ! -s "$NGINX_CONF" ]; then
             echo "❌ Failed to create nginx configuration!"
             exit 1
