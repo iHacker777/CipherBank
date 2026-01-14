@@ -3,8 +3,11 @@ package com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository
 import com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankStatement;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * JPA Repository for bank statements
@@ -24,6 +27,23 @@ public interface JpaBankStatementRepository extends JpaRepository<BankStatement,
      * @return true if a matching record exists, false otherwise
      */
     boolean existsByAccountNoAndUtr(Long accountNo, String utr);
+
+    /**
+     * Batch check for existing UTRs for a given account
+     * Returns only the UTRs that already exist in the database
+     *
+     * This is much more efficient than calling existsByAccountNoAndUtr() in a loop
+     *
+     * Example:
+     * Input: accountNo=12345, utrs=["UTR001", "UTR002", "UTR003"]
+     * Output: ["UTR002"] (if only UTR002 exists in DB)
+     *
+     * @param accountNo Account number
+     * @param utrs Set of UTRs to check
+     * @return Set of UTRs that already exist (subset of input)
+     */
+    @Query("SELECT bs.utr FROM BankStatement bs WHERE bs.accountNo = :accountNo AND bs.utr IN :utrs")
+    Set<String> findExistingUtrsByAccountNo(@Param("accountNo") Long accountNo, @Param("utrs") Set<String> utrs);
 
     /**
      * @deprecated This method checks 3 columns but database constraint only enforces 2 columns

@@ -274,9 +274,23 @@ kafka:
     operation-timeout: 30000  # SAME as dev
 
 # ============================================================================
-# STATEMENT QUERY SERVICE CONFIGURATION (PRODUCTION)
+# STATEMENT UPLOAD PERFORMANCE AND QUERY SERVICE CONFIGURATION (PRODUCTION)
 # ============================================================================
 statement:
+  upload:
+    # PRODUCTION: Higher batch size for better throughput
+    batch-size: 200
+
+    # PRODUCTION: Enable parallel processing for large files
+    # Make sure database connection pool can handle this
+    enable-parallel-processing: true
+
+    # PRODUCTION: More threads for parallel processing
+    # BusinessHikariPool has maximumPoolSize=20, so 8 threads is safe
+    parallel-threads: 8
+
+    # PRODUCTION: Keep statistics logging enabled for monitoring
+    log-batch-statistics: true
   query:
     max-page-size: 100
     default-page-size: 20

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Repository port for bank statements
@@ -26,6 +27,16 @@ public interface BankStatementRepositoryPort {
      * @return Saved statement or null if duplicate
      */
     BankStatement save(BankStatement stmt);
+
+    /**
+     * Save multiple bank statements in batch
+     * More efficient than saving one by one
+     * Handles constraint violations gracefully
+     *
+     * @param statements List of bank statements to save
+     * @return List of successfully saved statements (excludes duplicates)
+     */
+    List<BankStatement> saveAll(List<BankStatement> statements);
 
     /**
      * Find statement by ID
@@ -48,6 +59,18 @@ public interface BankStatementRepositoryPort {
      * @return true if duplicate exists, false otherwise
      */
     boolean existsByAccountNoAndUtr(Long accountNo, String utr);
+
+    /**
+     * Batch check for duplicate statements
+     * More efficient than checking one by one
+     *
+     * Returns Set of UTRs that already exist in database for the given account
+     *
+     * @param accountNo Account number
+     * @param utrs Set of UTRs to check
+     * @return Set of UTRs that already exist (subset of input utrs)
+     */
+    Set<String> findExistingUtrsByAccountNo(Long accountNo, Set<String> utrs);
 
     /**
      * @deprecated Use existsByAccountNoAndUtr() instead

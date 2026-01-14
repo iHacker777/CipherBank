@@ -273,9 +273,27 @@ kafka:
     operation-timeout: 30000
 
 # ============================================================================
-# STATEMENT QUERY SERVICE CONFIGURATION
+# STATEMENT UPLOAD PERFORMANCE AND QUERY SERVICE CONFIGURATION
 # ============================================================================
 statement:
+  upload:
+    # Batch size for database inserts
+    # Higher values = fewer DB round trips but more memory usage
+    # Recommended: 50-200 for most use cases
+    batch-size: 100
+
+    # Enable parallel processing using multiple threads
+    # Best for large files (500+ rows)
+    # Requires sufficient database connection pool size
+    enable-parallel-processing: false
+
+    # Number of threads for parallel processing
+    # Only used if enable-parallel-processing = true
+    # Must be less than database connection pool size
+    parallel-threads: 4
+
+    # Log detailed batch processing statistics
+    log-batch-statistics: true
   query:
     max-page-size: 100
     default-page-size: 20
