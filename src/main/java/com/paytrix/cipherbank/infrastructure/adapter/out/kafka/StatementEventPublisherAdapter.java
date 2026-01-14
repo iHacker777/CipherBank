@@ -57,7 +57,7 @@ public class StatementEventPublisherAdapter implements StatementEventPublisher {
             // Key: accountNo (ensures ordering per account)
             // Value: event object
             CompletableFuture<SendResult<Long, Object>> future =
-                    kafkaTemplate.send(statementsUploadedTopic, statement.getAccountNo(), event);
+                    kafkaTemplate.send(statementsUploadedTopic, statement.getAccountNo().toString(), event);
 
             // Wait for confirmation (with timeout)
             SendResult<Long, Object> result = future.get(5, TimeUnit.SECONDS);

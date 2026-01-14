@@ -109,7 +109,7 @@ spring:
     # Producer Configuration
     producer:
       # Serializers
-      key-serializer: org.apache.kafka.common.serialization.LongSerializer
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
       # Reliability settings
