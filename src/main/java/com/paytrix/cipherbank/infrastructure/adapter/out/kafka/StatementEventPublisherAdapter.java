@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class StatementEventPublisherAdapter implements StatementEventPublisher {
 
-    private final KafkaTemplate<Long, Object> kafkaTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     @Value("${kafka.topic.bank-statements-uploaded.name}")
     private String statementsUploadedTopic;
@@ -33,7 +33,7 @@ public class StatementEventPublisherAdapter implements StatementEventPublisher {
     @Value("${kafka.producer.retries:3}")
     private int retryAttempts;
 
-    public StatementEventPublisherAdapter(KafkaTemplate<Long, Object> kafkaTemplate) {
+    public StatementEventPublisherAdapter(KafkaTemplate<String, Object> kafkaTemplate) {
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -56,11 +56,11 @@ public class StatementEventPublisherAdapter implements StatementEventPublisher {
             // Publish to Kafka
             // Key: accountNo (ensures ordering per account)
             // Value: event object
-            CompletableFuture<SendResult<Long, Object>> future =
+            CompletableFuture<SendResult<String, Object>> future =
                     kafkaTemplate.send(statementsUploadedTopic, statement.getAccountNo().toString(), event);
 
             // Wait for confirmation (with timeout)
-            SendResult<Long, Object> result = future.get(5, TimeUnit.SECONDS);
+            SendResult<String, Object> result = future.get(5, TimeUnit.SECONDS);
 
             log.info("Successfully published statement event - ID: {}, Partition: {}, Offset: {}",
                     statement.getId(),
