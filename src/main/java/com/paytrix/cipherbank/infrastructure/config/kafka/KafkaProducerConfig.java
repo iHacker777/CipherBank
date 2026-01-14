@@ -30,7 +30,7 @@ public class KafkaProducerConfig {
      * Value: JSON (event objects)
      */
     @Bean
-    public ProducerFactory<Long, Object> producerFactory() {
+    public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> configProps = new HashMap<>();
 
         // Bootstrap servers
@@ -65,7 +65,7 @@ public class KafkaProducerConfig {
      * High-level API for sending messages
      */
     @Bean
-    public KafkaTemplate<Long, Object> kafkaTemplate() {
+    public KafkaTemplate<String, Object> kafkaTemplate() {
         return new KafkaTemplate<>(producerFactory());
     }
 }
