@@ -1,5 +1,6 @@
 package com.paytrix.cipherbank;
 
+import com.paytrix.cipherbank.infrastructure.config.FileUploadConfigProperties;
 import com.paytrix.cipherbank.infrastructure.config.JwtProperties;
 import com.paytrix.cipherbank.infrastructure.config.StatementColumnVisibilityProperties;
 import com.paytrix.cipherbank.infrastructure.config.StatementQueryConfigProperties;
@@ -14,12 +15,14 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  * - JwtProperties: JWT authentication configuration
  * - StatementQueryConfigProperties: Statement search pagination/sorting config
  * - StatementColumnVisibilityProperties: Role-based column visibility config
+ * - FileUploadConfigProperties: File upload size and type constraints
  */
 @SpringBootApplication
 @EnableConfigurationProperties({
         JwtProperties.class,
         StatementQueryConfigProperties.class,
-        StatementColumnVisibilityProperties.class
+        StatementColumnVisibilityProperties.class,
+        FileUploadConfigProperties.class
 })
 public class CipherBankApplication {
 

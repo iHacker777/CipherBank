@@ -1,6 +1,8 @@
 package com.paytrix.cipherbank.infrastructure.adapter.in.controller;
 
 import com.paytrix.cipherbank.application.port.in.StatementUploadUseCase;
+import com.paytrix.cipherbank.infrastructure.config.FileUploadConfigProperties;
+import com.paytrix.cipherbank.infrastructure.config.parser.ParserConfigLoader;
 import com.paytrix.cipherbank.infrastructure.exception.FileProcessingException;
 import com.paytrix.cipherbank.infrastructure.exception.InvalidFileTypeException;
 import org.slf4j.Logger;
@@ -15,15 +17,18 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 
 /**
  * Controller for bank statement file uploads
  *
  * SECURITY NOTE:
  * - This endpoint is protected by SecurityConfig which requires authentication
- * - No @PreAuthorize needed - all authenticated users can upload
- * - If you need role-based access control, see the version with @PreAuthorize
+ * - Only ROLE_ADMIN and ROLE_USER can upload files
+ *
+ * CONFIGURATION:
+ * - File size limits: Loaded from application.yml (file.upload.max-file-size-mb)
+ * - Allowed file types: Loaded from application.yml (file.upload.allowed-extensions)
+ * - Valid parser keys: Loaded from parser-config.yml (banks section keys)
  */
 @RestController
 @RequestMapping("/api/statements")
@@ -32,31 +37,37 @@ public class StatementUploadController {
 
     private static final Logger log = LoggerFactory.getLogger(StatementUploadController.class);
 
-    // Allowed file extensions
-    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(".csv", ".xls", ".xlsx", ".pdf");
-
-    // Maximum file size (10MB) - must match application.yml setting
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
-
     private final StatementUploadUseCase useCase;
+    private final FileUploadConfigProperties fileUploadConfig;
+    private final ParserConfigLoader parserConfigLoader;
 
-    public StatementUploadController(StatementUploadUseCase useCase) {
+    public StatementUploadController(
+            StatementUploadUseCase useCase,
+            FileUploadConfigProperties fileUploadConfig,
+            ParserConfigLoader parserConfigLoader) {
         this.useCase = useCase;
+        this.fileUploadConfig = fileUploadConfig;
+        this.parserConfigLoader = parserConfigLoader;
+
+        // Log configuration on startup
+        log.info("StatementUploadController initialized");
+        log.info("  - Max file size: {}", fileUploadConfig.getMaxFileSizeDisplay());
+        log.info("  - Allowed extensions: {}", fileUploadConfig.getAllowedExtensionsDisplay());
+        log.info("  - Valid parser keys: {}", parserConfigLoader.getValidParserKeysDisplay());
     }
 
     /**
      * Upload bank statement file
      *
      * AUTHENTICATION: Required (from SecurityConfig)
-     * AUTHORIZATION: None (all authenticated users can upload)
+     * AUTHORIZATION: ROLE_ADMIN or ROLE_USER
      *
-     * @param parserKey Bank identifier (iob, kgb, indianbank)
+     * @param parserKey Bank identifier (loaded from parser-config.yml)
      * @param username User uploading the file
      * @param accountNo Optional account number override (required for IOB)
      * @param file The statement file (CSV, XLS, XLSX, or PDF)
      * @return Upload result with statistics
      */
-
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<StatementUploadUseCase.UploadResult> upload(
@@ -70,7 +81,9 @@ public class StatementUploadController {
         log.info("Username: {}", username);
         log.info("Account No: {}", accountNo != null ? accountNo : "Not provided");
         log.info("File Name: {}", file.getOriginalFilename());
-        log.info("File Size: {} bytes", file.getSize());
+        log.info("File Size: {} bytes ({} MB)",
+                file.getSize(),
+                String.format("%.2f", file.getSize() / 1024.0 / 1024.0));
         log.info("Content Type: {}", file.getContentType());
 
         try {
@@ -80,30 +93,46 @@ public class StatementUploadController {
                 throw new FileProcessingException("File is empty. Please upload a valid statement file.");
             }
 
-            // Validate file size
-            if (file.getSize() > MAX_FILE_SIZE) {
-                log.error("File size {} exceeds maximum {}", file.getSize(), MAX_FILE_SIZE);
+            // Validate file size using configured max size
+            long maxFileSizeBytes = fileUploadConfig.getMaxFileSizeBytes();
+            if (file.getSize() > maxFileSizeBytes) {
+                double fileSizeMb = file.getSize() / 1024.0 / 1024.0;
+                log.error("File size {} bytes ({} MB) exceeds maximum {} bytes ({})",
+                        file.getSize(),
+                        String.format("%.2f", fileSizeMb),
+                        maxFileSizeBytes,
+                        fileUploadConfig.getMaxFileSizeDisplay());
+
                 throw new FileProcessingException(
-                        String.format("File size (%.2f MB) exceeds maximum allowed size (10 MB)",
-                                file.getSize() / 1024.0 / 1024.0)
+                        String.format(
+                                "File size (%.2f MB) exceeds maximum allowed size (%s)",
+                                fileSizeMb,
+                                fileUploadConfig.getMaxFileSizeDisplay()
+                        )
                 );
             }
 
-            // Validate file extension
+            // Validate file extension using configured allowed extensions
             String filename = file.getOriginalFilename();
             if (filename == null || !hasAllowedExtension(filename)) {
                 log.error("Invalid file type: {}", filename);
                 throw new InvalidFileTypeException(
                         filename,
-                        String.join(", ", ALLOWED_EXTENSIONS)
+                        fileUploadConfig.getAllowedExtensionsDisplay()
                 );
             }
 
-            // Validate parser key
+            // Validate parser key using parser-config.yml
             if (!isValidParserKey(parserKey)) {
-                log.error("Invalid parser key: {}", parserKey);
+                log.error("Invalid parser key: {} - Valid keys are: {}",
+                        parserKey,
+                        parserConfigLoader.getValidParserKeysDisplay());
                 throw new IllegalArgumentException(
-                        "Invalid parser key. Allowed values: iob, kgb, indianbank"
+                        String.format(
+                                "Invalid parser key: '%s'. Allowed values: %s",
+                                parserKey,
+                                parserConfigLoader.getValidParserKeysDisplay()
+                        )
                 );
             }
 
@@ -159,18 +188,25 @@ public class StatementUploadController {
 
     /**
      * Check if filename has an allowed extension
+     * Uses configured allowed extensions from application.yml
+     *
+     * @param filename The filename to check
+     * @return true if extension is allowed, false otherwise
      */
     private boolean hasAllowedExtension(String filename) {
         String lowerFilename = filename.toLowerCase();
-        return ALLOWED_EXTENSIONS.stream()
+        return Arrays.stream(fileUploadConfig.getAllowedExtensions())
                 .anyMatch(lowerFilename::endsWith);
     }
 
     /**
      * Check if parser key is valid
+     * Uses parser keys from parser-config.yml
+     *
+     * @param parserKey The parser key to validate
+     * @return true if valid, false otherwise
      */
     private boolean isValidParserKey(String parserKey) {
-        return Arrays.asList("iob", "kgb", "indianbank")
-                .contains(parserKey.toLowerCase());
+        return parserConfigLoader.isValidParserKey(parserKey);
     }
 }
