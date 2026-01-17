@@ -14,6 +14,7 @@ import com.paytrix.cipherbank.infrastructure.parser.ParserEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -56,8 +57,11 @@ public class StatementUploadService implements StatementUploadUseCase {
         }
     }
 
+    /**
+     * No @Transactional on main method
+     * Upload record is committed BEFORE parallel processing starts
+     */
     @Override
-    @Transactional
     public UploadResult upload(UploadCommand cmd) {
         long startTime = System.currentTimeMillis();
         log.info("Starting upload process for parserKey: {}, username: {}", cmd.parserKey(), cmd.username());
@@ -65,14 +69,11 @@ public class StatementUploadService implements StatementUploadUseCase {
         var bank = bankProfileRepo.findByParserKey(cmd.parserKey())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown parserKey: " + cmd.parserKey()));
 
-        // create upload row
-        var upload = new BankStatementUpload();
-        upload.setUsername(cmd.username());
-        upload.setUploadTime(Instant.now());
-        upload.setBank(bank);
-        upload = uploadRepo.save(upload);
+        // Create and commit upload in separate transaction
+        // This ensures worker threads can see the upload record
+        BankStatementUpload upload = createAndCommitUpload(cmd.username(), bank);
 
-        log.info("Created upload record with ID: {}", upload.getId());
+        log.info("Created and committed upload record with ID: {}", upload.getId());
 
         int parsed = 0;
         int inserted = 0;
@@ -134,6 +135,30 @@ public class StatementUploadService implements StatementUploadUseCase {
     }
 
     /**
+     * Create upload in a NEW transaction and commit immediately
+     * This ensures the upload record is visible to all worker threads
+     *
+     * REQUIRES_NEW propagation ensures this runs in a separate transaction
+     * even if called from a transactional context
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected BankStatementUpload createAndCommitUpload(String username,
+                                                        com.paytrix.cipherbank.infrastructure.adapter.out.persistence.entity.business.BankProfile bank) {
+        var upload = new BankStatementUpload();
+        upload.setUsername(username);
+        upload.setUploadTime(Instant.now());
+        upload.setBank(bank);
+
+        BankStatementUpload savedUpload = uploadRepo.save(upload);
+
+        log.debug("Upload record created and will be committed: ID={}, Username={}",
+                savedUpload.getId(), username);
+
+        // Transaction commits when this method returns
+        return savedUpload;
+    }
+
+    /**
      * Process batches sequentially (single-threaded)
      * This is the default and safer mode
      */
@@ -185,7 +210,11 @@ public class StatementUploadService implements StatementUploadUseCase {
             final List<ParserEngine.ParsedRow> batch = batches.get(i);
 
             Future<BatchResult> future = executor.submit(() -> {
-                log.debug("Thread {} processing batch {}/{}", Thread.currentThread().getName(), batchIndex + 1, batches.size());
+                log.debug("Thread {} processing batch {}/{}",
+                        Thread.currentThread().getName(), batchIndex + 1, batches.size());
+
+                // Each thread processes its batch
+                // Upload record is already committed, so foreign key will work
                 return processBatch(batch, upload, accountNo);
             });
 
@@ -235,91 +264,93 @@ public class StatementUploadService implements StatementUploadUseCase {
         int deduped = 0;
         List<BankStatement> publishedStatements = new ArrayList<>();
 
-        // Group rows by account number for efficient batch dedup checking
-        Map<Long, List<ParserEngine.ParsedRow>> rowsByAccount = batch.stream()
+        // Filter rows with valid account numbers
+        List<ParserEngine.ParsedRow> validRows = batch.stream()
                 .filter(r -> r.getAccountNo() != null && !r.getAccountNo().isBlank())
-                .collect(Collectors.groupingBy(r -> Long.parseLong(r.getAccountNo())));
+                .toList();
 
-        // Process each account group
-        for (Map.Entry<Long, List<ParserEngine.ParsedRow>> entry : rowsByAccount.entrySet()) {
-            Long acctNo = entry.getKey();
-            List<ParserEngine.ParsedRow> accountRows = entry.getValue();
+        if (validRows.isEmpty()) {
+            log.warn("No valid rows with account numbers in batch");
+            return new BatchResult(0, 0, publishedStatements);
+        }
 
-            // STEP 1: Collect all UTRs in this batch for this account
-            Set<String> batchUtrs = accountRows.stream()
-                    .map(ParserEngine.ParsedRow::getUtr)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
+        // All rows should have the same account number (single file = single account)
+        Long acctNo = Long.parseLong(validRows.get(0).getAccountNo());
 
-            // STEP 2: Batch check against database - find which UTRs already exist
-            Set<String> existingUtrs = stmtRepo.findExistingUtrsByAccountNo(acctNo, batchUtrs);
+        // STEP 1: Collect all UTRs in this batch
+        Set<String> batchUtrs = validRows.stream()
+                .map(ParserEngine.ParsedRow::getUtr)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
 
-            // STEP 3: Also track within-batch duplicates
-            Set<String> seenInBatch = new HashSet<>();
+        // STEP 2: Batch check against database - find which UTRs already exist
+        Set<String> existingUtrs = stmtRepo.findExistingUtrsByAccountNo(acctNo, batchUtrs);
 
-            // STEP 4: Filter out duplicates and prepare statements for batch insert
-            List<BankStatement> statementsToInsert = new ArrayList<>();
+        // STEP 3: Track within-batch duplicates
+        Set<String> seenInBatch = new HashSet<>();
 
-            for (ParserEngine.ParsedRow r : accountRows) {
-                // Skip if amount is null or non-positive
-                if (r.getAmount() == null || r.getAmount().signum() <= 0) {
-                    continue;
-                }
+        // STEP 4: Filter out duplicates and prepare statements for batch insert
+        List<BankStatement> statementsToInsert = new ArrayList<>();
 
-                String utr = r.getUtr();
-
-                // Check if duplicate in database
-                if (existingUtrs.contains(utr)) {
-                    deduped++;
-                    log.debug("Skipped DB duplicate: AccountNo={}, UTR={}", acctNo, utr);
-                    continue;
-                }
-
-                // Check if duplicate within batch
-                if (seenInBatch.contains(utr)) {
-                    deduped++;
-                    log.debug("Skipped within-batch duplicate: AccountNo={}, UTR={}", acctNo, utr);
-                    continue;
-                }
-
-                // Mark as seen in this batch
-                seenInBatch.add(utr);
-
-                // Create statement entity
-                var s = new BankStatement();
-                s.setUpload(upload);
-                s.setTransactionDateTime(r.getTransactionDateTime());
-                s.setAmount(r.getAmount());
-                s.setBalance(r.getBalance());
-                s.setReference(r.getReference());
-                s.setOrderId(r.getOrderId());
-                s.setUtr(r.getUtr());
-                s.setPayIn(r.isPayIn());
-                s.setApprovalStatus(ApprovalStatus.PENDING);
-                s.setProcessed(false);
-                s.setType(r.getOrderId());
-                s.setUploadTimestamp(Instant.now());
-                s.setAccountNo(acctNo);
-
-                statementsToInsert.add(s);
+        for (ParserEngine.ParsedRow r : validRows) {
+            // Skip if amount is null or non-positive
+            if (r.getAmount() == null || r.getAmount().signum() <= 0) {
+                continue;
             }
 
-            // STEP 5: Batch insert all non-duplicate statements
-            if (!statementsToInsert.isEmpty()) {
-                List<BankStatement> savedStatements = stmtRepo.saveAll(statementsToInsert);
-                inserted += savedStatements.size();
-                publishedStatements.addAll(savedStatements);
+            String utr = r.getUtr();
 
-                // If saveAll returned fewer records than we tried to insert,
-                // it means some were duplicates (caught by DB constraint)
-                int dbDuplicates = statementsToInsert.size() - savedStatements.size();
-                if (dbDuplicates > 0) {
-                    deduped += dbDuplicates;
-                    log.debug("Batch insert detected {} DB constraint duplicates", dbDuplicates);
-                }
-
-                log.debug("Batch inserted {} statements for account {}", savedStatements.size(), acctNo);
+            // Check if duplicate in database
+            if (existingUtrs.contains(utr)) {
+                deduped++;
+                log.debug("Skipped DB duplicate: AccountNo={}, UTR={}", acctNo, utr);
+                continue;
             }
+
+            // Check if duplicate within batch
+            if (seenInBatch.contains(utr)) {
+                deduped++;
+                log.debug("Skipped within-batch duplicate: AccountNo={}, UTR={}", acctNo, utr);
+                continue;
+            }
+
+            // Mark as seen in this batch
+            seenInBatch.add(utr);
+
+            // Create statement entity
+            var s = new BankStatement();
+            s.setUpload(upload);  // FIXED: This now references a committed upload record
+            s.setTransactionDateTime(r.getTransactionDateTime());
+            s.setAmount(r.getAmount());
+            s.setBalance(r.getBalance());
+            s.setReference(r.getReference());
+            s.setOrderId(r.getOrderId());
+            s.setUtr(r.getUtr());
+            s.setPayIn(r.isPayIn());
+            s.setApprovalStatus(ApprovalStatus.PENDING);
+            s.setProcessed(false);
+            s.setType(r.getOrderId());
+            s.setUploadTimestamp(Instant.now());
+            s.setAccountNo(acctNo);
+
+            statementsToInsert.add(s);
+        }
+
+        // STEP 5: Batch insert all non-duplicate statements
+        if (!statementsToInsert.isEmpty()) {
+            List<BankStatement> savedStatements = stmtRepo.saveAll(statementsToInsert);
+            inserted += savedStatements.size();
+            publishedStatements.addAll(savedStatements);
+
+            // If saveAll returned fewer records than we tried to insert,
+            // it means some were duplicates (caught by DB constraint)
+            int dbDuplicates = statementsToInsert.size() - savedStatements.size();
+            if (dbDuplicates > 0) {
+                deduped += dbDuplicates;
+                log.debug("Batch insert detected {} DB constraint duplicates", dbDuplicates);
+            }
+
+            log.debug("Batch inserted {} statements for account {}", savedStatements.size(), acctNo);
         }
 
         return new BatchResult(inserted, deduped, publishedStatements);

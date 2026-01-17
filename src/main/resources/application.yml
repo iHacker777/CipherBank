@@ -13,7 +13,7 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://localhost:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://localhost:3306/paytrix_db?useSSL=true&serverTimeZone=Asia/Kolkata
       username: root
       password: root@123
       hikari:
@@ -69,7 +69,7 @@ spring:
     # JPA CONFIGURATION - BUSINESS DATABASE (PRIMARY)
     # ============================================================================
     business:
-      show-sql: true
+      show-sql: false
       format-sql: true
       hibernate:
         ddl-auto: update
@@ -280,12 +280,12 @@ statement:
     # Batch size for database inserts
     # Higher values = fewer DB round trips but more memory usage
     # Recommended: 50-200 for most use cases
-    batch-size: 100
+    batch-size: 200
 
     # Enable parallel processing using multiple threads
     # Best for large files (500+ rows)
     # Requires sufficient database connection pool size
-    enable-parallel-processing: false
+    enable-parallel-processing: true
 
     # Number of threads for parallel processing
     # Only used if enable-parallel-processing = true
@@ -340,18 +340,18 @@ logging:
   level:
     root: INFO
     # Security Database Logs
-    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.security: DEBUG
-    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.security: DEBUG
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.security: INFO
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.security: INFO
     # Business Database Logs
-    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business: DEBUG
-    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business: DEBUG
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.repository.business: INFO
+    com.paytrix.cipherbank.infrastructure.adapter.out.persistence.adapter.business: INFO
     # Hibernate SQL (shows queries from both databases)
-    org.hibernate.SQL: DEBUG
+    org.hibernate.SQL: INFO
     # Application logs
     com.paytrix.cipherbank: INFO
     # DataSource logs (to see which database is being used)
-    com.zaxxer.hikari.HikariConfig: DEBUG
+    com.zaxxer.hikari.HikariConfig: INFO
     com.zaxxer.hikari.HikariDataSource: INFO
     # Kafka logs
-    org.apache.kafka: INFO
-    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
