@@ -5,6 +5,7 @@ import com.paytrix.cipherbank.infrastructure.config.FileUploadConfigProperties;
 import com.paytrix.cipherbank.infrastructure.config.parser.ParserConfigLoader;
 import com.paytrix.cipherbank.infrastructure.exception.FileProcessingException;
 import com.paytrix.cipherbank.infrastructure.exception.InvalidFileTypeException;
+import com.paytrix.cipherbank.infrastructure.exception.InvalidParserKeyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -111,12 +112,13 @@ public class StatementUploadController {
                                 fileUploadConfig.getMaxFileSizeDisplay()));
             }
 
-            // Validate parser key using parser-config.yml
+            // Validate parser key (includes both existence and enabled check)
             if (!isValidParserKey(parserKey)) {
                 log.error("Invalid parser key: {} - Valid keys are: {}",
                         parserKey,
                         parserConfigLoader.getValidParserKeysDisplay());
-                throw new IllegalArgumentException(
+                throw new InvalidParserKeyException(
+                        parserKey,
                         String.format(
                                 "Invalid parser key: '%s'. Allowed values: %s",
                                 parserKey,

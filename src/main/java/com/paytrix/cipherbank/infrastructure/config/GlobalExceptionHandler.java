@@ -431,6 +431,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
     }
 
+    /**
+     * Handle invalid or disabled parser key errors
+     */
+    @ExceptionHandler(InvalidParserKeyException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidParserKey(
+            InvalidParserKeyException ex,
+            WebRequest request
+    ) {
+        log.warn("Invalid parser key: {}", ex.getParserKey());
+
+        Map<String, Object> response = buildErrorResponse(
+                "Unprocessable Entity",
+                ex.getMessage(),
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                request
+        );
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Database Errors (500/503)
     // ═══════════════════════════════════════════════════════════════════════

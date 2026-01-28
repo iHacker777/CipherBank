@@ -2,9 +2,11 @@ banks:
   # KGB Bank (Kerala Gramin Bank) - Already configured
   kgb:
     parserKey: "kgb"
+    enabled: true              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     xls:
+      enabled: true            # Enable/disable XLS format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -47,6 +49,7 @@ banks:
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
 
     xlsx:
+      enabled: true            # Enable/disable XLSX format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -91,9 +94,11 @@ banks:
   # IOB Bank (Indian Overseas Bank) - CSV format
   iob:
     parserKey: "iob"
+    enabled: true              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     csv:
+      enabled: true            # Enable/disable CSV format
       # Account number NOT in CSV file - must be provided in request
       account:
         required: true               # account number is mandatory
@@ -133,9 +138,11 @@ banks:
   # Indian Bank - XLSX format
   indianbank:
     parserKey: "indianbank"
+    enabled: false              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     xlsx:
+      enabled: true            # Enable/disable XLSX format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -177,6 +184,7 @@ banks:
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
 
     xls:
+      enabled: true            # Enable/disable XLS format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -222,9 +230,11 @@ banks:
   # Debit transactions (IB-To format) are automatically skipped by parser
   uco:
     parserKey: "uco"
+    enabled: true              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     xls:
+      enabled: true            # Enable/disable XLS format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 

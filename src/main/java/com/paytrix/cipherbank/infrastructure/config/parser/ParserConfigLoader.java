@@ -55,18 +55,26 @@ public class ParserConfigLoader {
     }
 
     /**
-     * Check if a parser key is valid
-     * Returns true if the parser key exists in parser-config.yml
+     * Check if a parser key is valid and enabled
+     * Returns true if the parser key exists in parser-config.yml AND is enabled
+     * Disabled parsers are considered invalid
      *
      * @param parserKey The parser key to check
-     * @return true if valid, false otherwise
+     * @return true if valid and enabled, false otherwise
      */
     public boolean isValidParserKey(String parserKey) {
         if (parserKey == null || parserKey.trim().isEmpty()) {
             return false;
         }
-        return config.getBanks() != null &&
-                config.getBanks().containsKey(parserKey.trim().toLowerCase());
+
+        // Check if parser exists
+        if (config.getBanks() == null || !config.getBanks().containsKey(parserKey.trim().toLowerCase())) {
+            return false;
+        }
+
+        // Check if parser is enabled (null defaults to enabled)
+        ParserConfig.BankConfig bankConfig = config.getBanks().get(parserKey.trim().toLowerCase());
+        return bankConfig.getEnabled() == null || bankConfig.getEnabled();
     }
 
     /**
@@ -108,17 +116,17 @@ public class ParserConfigLoader {
         ParserConfig.BankConfig bankConfig = getBankConfig(parserKey);
         Set<String> extensions = new HashSet<>();
 
-        // Check which formats are configured (non-null)
-        if (bankConfig.getCsv() != null) {
+        // Check which formats are configured AND enabled (non-null and enabled)
+        if (bankConfig.getCsv() != null && isFormatEnabled(bankConfig.getCsv())) {
             extensions.add(".csv");
         }
-        if (bankConfig.getXls() != null) {
+        if (bankConfig.getXls() != null && isFormatEnabled(bankConfig.getXls())) {
             extensions.add(".xls");
         }
-        if (bankConfig.getXlsx() != null) {
+        if (bankConfig.getXlsx() != null && isFormatEnabled(bankConfig.getXlsx())) {
             extensions.add(".xlsx");
         }
-        if (bankConfig.getPdf() != null) {
+        if (bankConfig.getPdf() != null && isFormatEnabled(bankConfig.getPdf())) {
             extensions.add(".pdf");
         }
 
@@ -141,5 +149,43 @@ public class ParserConfigLoader {
             return "none";
         }
         return String.join(", ", extensions);
+    }
+
+    /**
+     * Check if a parser is enabled
+     * Returns true if enabled field is null (default) or true
+     *
+     * @param parserKey The parser key to check
+     * @return true if enabled or not specified, false if explicitly disabled
+     * @throws IllegalArgumentException if parser key is not found
+     */
+    public boolean isParserEnabled(String parserKey) {
+        ParserConfig.BankConfig bankConfig = getBankConfig(parserKey);
+        // Default to enabled if not specified (null means enabled)
+        return bankConfig.getEnabled() == null || bankConfig.getEnabled();
+    }
+
+    /**
+     * Check if a file type config is enabled
+     * Returns true if enabled field is null (default) or true
+     *
+     * @param config The FileTypeConfig to check
+     * @return true if enabled or not specified, false if explicitly disabled
+     */
+    private boolean isFormatEnabled(ParserConfig.FileTypeConfig config) {
+        // Default to enabled if not specified (null means enabled)
+        return config.getEnabled() == null || config.getEnabled();
+    }
+
+    /**
+     * Check if a PDF config is enabled
+     * Returns true if enabled field is null (default) or true
+     *
+     * @param config The PdfConfig to check
+     * @return true if enabled or not specified, false if explicitly disabled
+     */
+    private boolean isFormatEnabled(ParserConfig.PdfConfig config) {
+        // Default to enabled if not specified (null means enabled)
+        return config.getEnabled() == null || config.getEnabled();
     }
 }
