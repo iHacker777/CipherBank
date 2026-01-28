@@ -10,19 +10,19 @@ import jakarta.validation.constraints.NotNull;
 /**
  * Configuration properties for file upload constraints
  *
- * Loads file upload settings from application.yml under the prefix "file.upload"
+ * Loads file upload settings from application.yml under the prefix
+ * "file.upload"
  *
- * This class is registered as a bean via @EnableConfigurationProperties in CipherBankApplication
+ * This class is registered as a bean via @EnableConfigurationProperties in
+ * CipherBankApplication
  *
  * Example configuration:
  * file:
- *   upload:
- *     max-file-size-mb: 10
- *     allowed-extensions:
- *       - .csv
- *       - .xls
- *       - .xlsx
- *       - .pdf
+ * upload:
+ * max-file-size-mb: 10
+ *
+ * NOTE: Allowed file extensions are determined per parser from
+ * parser-config.yml
  */
 @Data
 @ConfigurationProperties(prefix = "file.upload")
@@ -38,12 +38,6 @@ public class FileUploadConfigProperties {
     @NotNull
     @Min(1)
     private Integer maxFileSizeMb = 10;
-
-    /**
-     * Allowed file extensions (including the dot)
-     * Default: [.csv, .xls, .xlsx, .pdf]
-     */
-    private String[] allowedExtensions = {".csv", ".xls", ".xlsx", ".pdf"};
 
     /**
      * Get max file size in bytes
@@ -63,15 +57,5 @@ public class FileUploadConfigProperties {
      */
     public String getMaxFileSizeDisplay() {
         return maxFileSizeMb + " MB";
-    }
-
-    /**
-     * Get comma-separated list of allowed extensions
-     * Used for error messages
-     *
-     * @return String like ".csv, .xls, .xlsx, .pdf"
-     */
-    public String getAllowedExtensionsDisplay() {
-        return String.join(", ", allowedExtensions);
     }
 }

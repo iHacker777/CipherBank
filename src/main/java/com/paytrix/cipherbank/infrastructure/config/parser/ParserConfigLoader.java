@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 @Component
@@ -88,5 +89,57 @@ public class ParserConfigLoader {
      */
     public ParserConfig getConfig() {
         return config;
+    }
+
+    /**
+     * Get supported file extensions for a specific parser key
+     * Determines extensions by checking which formats are configured in
+     * parser-config.yml
+     *
+     * Example: If parser has "csv" and "xls" configured, returns [".csv", ".xls"]
+     *
+     * @param parserKey The parser key (e.g., "iob", "kgb", "uco")
+     * @return Set of supported extensions with dots (e.g., [".csv", ".xls",
+     *         ".xlsx"])
+     * @throws IllegalArgumentException if parser key is not found
+     */
+    public Set<String> getSupportedExtensions(String parserKey) {
+
+        ParserConfig.BankConfig bankConfig = getBankConfig(parserKey);
+        Set<String> extensions = new HashSet<>();
+
+        // Check which formats are configured (non-null)
+        if (bankConfig.getCsv() != null) {
+            extensions.add(".csv");
+        }
+        if (bankConfig.getXls() != null) {
+            extensions.add(".xls");
+        }
+        if (bankConfig.getXlsx() != null) {
+            extensions.add(".xlsx");
+        }
+        if (bankConfig.getPdf() != null) {
+            extensions.add(".pdf");
+        }
+
+        return extensions;
+    }
+
+    /**
+     * Get comma-separated list of supported extensions for display
+     * Used for error messages
+     *
+     * Example return: ".csv, .xls, .xlsx"
+     *
+     * @param parserKey The parser key
+     * @return Comma-separated string of supported extensions
+     * @throws IllegalArgumentException if parser key is not found
+     */
+    public String getSupportedExtensionsDisplay(String parserKey) {
+        Set<String> extensions = getSupportedExtensions(parserKey);
+        if (extensions.isEmpty()) {
+            return "none";
+        }
+        return String.join(", ", extensions);
     }
 }

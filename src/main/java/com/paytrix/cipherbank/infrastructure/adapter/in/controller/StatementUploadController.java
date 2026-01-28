@@ -16,7 +16,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
-import java.util.Arrays;
 
 /**
  * Controller for bank statement file uploads
@@ -26,8 +25,10 @@ import java.util.Arrays;
  * - Only ROLE_ADMIN and ROLE_USER can upload files
  *
  * CONFIGURATION:
- * - File size limits: Loaded from application.yml (file.upload.max-file-size-mb)
- * - Allowed file types: Loaded from application.yml (file.upload.allowed-extensions)
+ * - File size limits: Loaded from application.yml
+ * (file.upload.max-file-size-mb)
+ * - Allowed file types: Determined by parser-config.yml (parser-specific
+ * formats)
  * - Valid parser keys: Loaded from parser-config.yml (banks section keys)
  */
 @RestController
@@ -52,7 +53,6 @@ public class StatementUploadController {
         // Log configuration on startup
         log.info("StatementUploadController initialized");
         log.info("  - Max file size: {}", fileUploadConfig.getMaxFileSizeDisplay());
-        log.info("  - Allowed extensions: {}", fileUploadConfig.getAllowedExtensionsDisplay());
         log.info("  - Valid parser keys: {}", parserConfigLoader.getValidParserKeysDisplay());
     }
 
@@ -63,19 +63,20 @@ public class StatementUploadController {
      * AUTHORIZATION: ROLE_ADMIN or ROLE_USER
      *
      * @param parserKey Bank identifier (loaded from parser-config.yml)
-     * @param username User uploading the file
+     * @param username  User uploading the file
      * @param accountNo Optional account number override (required for IOB)
-     * @param file The statement file (CSV, XLS, XLSX, or PDF)
+     * @param file      The statement file (CSV, XLS, XLSX, or PDF)
      * @return Upload result with statistics
      */
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<StatementUploadUseCase.UploadResult> upload(
             @RequestParam("parserKey") @NotBlank String parserKey,
-            @RequestParam("username")  @NotBlank String username,
+            @RequestParam("username") @NotBlank String username,
             @RequestParam(value = "accountNo", required = false) String accountNo,
             @RequestPart("file") MultipartFile file
     ) {
+
         log.info("=== UPLOAD REQUEST RECEIVED ===");
         log.info("Parser Key: {}", parserKey);
         log.info("Username: {}", username);
@@ -107,19 +108,7 @@ public class StatementUploadController {
                         String.format(
                                 "File size (%.2f MB) exceeds maximum allowed size (%s)",
                                 fileSizeMb,
-                                fileUploadConfig.getMaxFileSizeDisplay()
-                        )
-                );
-            }
-
-            // Validate file extension using configured allowed extensions
-            String filename = file.getOriginalFilename();
-            if (filename == null || !hasAllowedExtension(filename)) {
-                log.error("Invalid file type: {}", filename);
-                throw new InvalidFileTypeException(
-                        filename,
-                        fileUploadConfig.getAllowedExtensionsDisplay()
-                );
+                                fileUploadConfig.getMaxFileSizeDisplay()));
             }
 
             // Validate parser key using parser-config.yml
@@ -131,9 +120,19 @@ public class StatementUploadController {
                         String.format(
                                 "Invalid parser key: '%s'. Allowed values: %s",
                                 parserKey,
-                                parserConfigLoader.getValidParserKeysDisplay()
-                        )
-                );
+                                parserConfigLoader.getValidParserKeysDisplay()));
+            }
+
+            // Validate file extension using parser-specific supported extensions
+            String filename = file.getOriginalFilename();
+            if (filename == null || !hasAllowedExtension(filename, parserKey)) {
+                log.error("Invalid file type '{}' for parser '{}' - Supported extensions: {}",
+                        filename,
+                        parserKey,
+                        parserConfigLoader.getSupportedExtensionsDisplay(parserKey));
+                throw new InvalidFileTypeException(
+                        filename,
+                        parserConfigLoader.getSupportedExtensionsDisplay(parserKey));
             }
 
             // Create upload command
@@ -187,15 +186,16 @@ public class StatementUploadController {
     }
 
     /**
-     * Check if filename has an allowed extension
-     * Uses configured allowed extensions from application.yml
+     * Check if filename has an allowed extension for the specific parser
+     * Uses parser-specific supported extensions from parser-config.yml
      *
-     * @param filename The filename to check
-     * @return true if extension is allowed, false otherwise
+     * @param filename  The filename to check
+     * @param parserKey The parser key to check extensions for
+     * @return true if extension is supported by the parser, false otherwise
      */
-    private boolean hasAllowedExtension(String filename) {
+    private boolean hasAllowedExtension(String filename, String parserKey) {
         String lowerFilename = filename.toLowerCase();
-        return Arrays.stream(fileUploadConfig.getAllowedExtensions())
+        return parserConfigLoader.getSupportedExtensions(parserKey).stream()
                 .anyMatch(lowerFilename::endsWith);
     }
 

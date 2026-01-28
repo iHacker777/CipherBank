@@ -105,11 +105,6 @@ spring:
   file:
     upload:
       max-file-size-mb: 10       # Our application-level max file size in MB
-      allowed-extensions: # Allowed file extensions (with dot)
-        - .csv
-        - .xls
-        - .xlsx
-        - .pdf
 
   # ============================================================================
   # KAFKA CONFIGURATION (DEVELOPMENT)
