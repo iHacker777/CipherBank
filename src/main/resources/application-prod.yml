@@ -13,9 +13,9 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
-      username: root
-      password: Alpha3034#
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: doadmin
+      password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 10
@@ -30,9 +30,9 @@ spring:
     # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
-      username: root
-      password: Alpha3034#
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: doadmin
+      password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 20
@@ -206,7 +206,7 @@ jwt:
 # ============================================================================
 security:
   ip-whitelist:
-    enabled: true      # Set to false to disable IP whitelist filtering
+    enabled: false      # Set to false to disable IP whitelist filtering
     debug: true        # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
 
 # ============================================================================
@@ -270,7 +270,7 @@ kafka:
 
   # Admin Configuration (for topic creation)
   admin:
-    auto-create: false  # PROD: false (manual topic creation for control)
+    auto-create: true  # PROD: false (manual topic creation for control)
     operation-timeout: 30000  # SAME as dev
 
 # ============================================================================
