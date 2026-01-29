@@ -2,9 +2,11 @@ banks:
   # KGB Bank (Kerala Gramin Bank) - Already configured
   kgb:
     parserKey: "kgb"
+    enabled: true              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     xls:
+      enabled: true            # Enable/disable XLS format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -47,6 +49,7 @@ banks:
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
 
     xlsx:
+      enabled: true            # Enable/disable XLSX format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -91,9 +94,11 @@ banks:
   # IOB Bank (Indian Overseas Bank) - CSV format
   iob:
     parserKey: "iob"
+    enabled: true              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     csv:
+      enabled: true            # Enable/disable CSV format
       # Account number NOT in CSV file - must be provided in request
       account:
         required: true               # account number is mandatory
@@ -133,9 +138,11 @@ banks:
   # Indian Bank - XLSX format
   indianbank:
     parserKey: "indianbank"
+    enabled: false              # Enable/disable entire parser
     timezone: "Asia/Kolkata"
 
     xlsx:
+      enabled: true            # Enable/disable XLSX format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -177,6 +184,7 @@ banks:
       output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
 
     xls:
+      enabled: true            # Enable/disable XLS format
       sheetIndex: "0"
       numeric: { decimalSeparator: ".", thousandsSeparator: "," }
 
@@ -212,6 +220,64 @@ banks:
         orderId: { index: 3, trimNbsp: true }
         utr: { index: 1, cleanDigitsOnly: true }
         utrFallback: { when: "missingOrNonNumeric", regex: "\\b[A-Z]{4}\\d{7}\\b" }
+
+      payInRule: { type: "creditColumn" }
+      rowStop: { mode: "blankRows" }
+      output: { includeFinalBalance: true, computeTypeFrom: "orderId" }
+
+  # UCO Bank - XLS format
+  # CREDIT-ONLY: Only deposit/credit transactions are extracted
+  # Debit transactions (IB-To format) are automatically skipped by parser
+  uco:
+    parserKey: "uco"
+    enabled: true              # Enable/disable entire parser
+    timezone: "Asia/Kolkata"
+
+    xls:
+      enabled: true            # Enable/disable XLS format
+      sheetIndex: "0"
+      numeric: { decimalSeparator: ".", thousandsSeparator: "," }
+
+      # Account number extraction from XLS file
+      account:
+        required: false              # Extract from file (Row 4, Col 8 in 0-indexed)
+        source: "excelCell"
+        excelCell:
+          row: 5                     # Row 5 (1-based index) - "Number: 05220210010686"
+          col: 9                     # Column 9 (I) contains the account number
+        cleanupRegex: "\\D"          # Remove all non-digits
+        useOneBasedIndex: true       # Use Excel-style 1-based row/column indexing
+
+      # Header configuration
+      headers:
+        mode: "search"
+        search:
+          useOneBasedRowIndex: true
+          fixedHeaderRows: { from: 29, to: 29 }  # Single row header at row 29
+          multiRowCount: 1                        # Single row header
+          mergeSeparator: " "
+          rowStartOffset: 1                       # Data starts one row after header (row 30)
+          expect:
+            date:      ["tran. date", "tran date", "transaction date", "date"]
+            reference: ["narration", "description", "particulars"]
+            # NOTE: Bank spells "Withdrawal" as "Withdrawl" (typo)
+            debit:     ["withdrawl", "withdrawal", "debit", "dr"]
+            credit:    ["deposit", "credit", "cr"]
+            balance:   ["balance", "bal"]
+
+      # Date parsing (dd/MM/yyyy format)
+      dateParse: { input: "string", format: "dd/MM/yyyy" }
+
+      # Reference field parsing
+      # Format: MPAY/UPI/TRTR/<12-digit-UTR>/<name>/<bank>/<orderid>
+      # Example: MPAY/UPI/TRTR/620522605866/ShaynaArsatbh/AUBL/XXX
+      # Split result: [MPAY, UPI, TRTR, 620522605866, ShaynaArsatbh, AUBL, XXX]
+      reference:
+        splitter: "/"
+        partsCount: { mode: "oneOf", values: [7] }   # UCO UPI format has 7 parts
+        orderId: { index: 6, trimNbsp: true }        # Last part (XXX, XXX7, XXX0278, etc.)
+        utr: { index: 3, cleanDigitsOnly: true }     # 4th part after MPAY/UPI/TRTR/
+        utrFallback: { when: "missingOrNonNumeric", regex: "\\b\\d{12}\\b" }
 
       payInRule: { type: "creditColumn" }
       rowStop: { mode: "blankRows" }

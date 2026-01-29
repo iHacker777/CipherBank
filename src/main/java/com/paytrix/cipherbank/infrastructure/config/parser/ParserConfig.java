@@ -12,6 +12,7 @@ public class ParserConfig {
     @Data
     public static class BankConfig {
         private String parserKey;
+        private Boolean enabled;        // Enable/disable entire parser (default: true)
         private String timezone;        // e.g., Asia/Kolkata
         private FileTypeConfig csv;
         private FileTypeConfig xlsx;
@@ -21,6 +22,7 @@ public class ParserConfig {
 
     @Data
     public static class FileTypeConfig {
+        private Boolean enabled;        // Enable/disable this file format (default: true)
         private String sheetIndex;      // for excel
         private Headers headers;
         private Account account;
@@ -42,6 +44,7 @@ public class ParserConfig {
 
     @Data
     public static class PdfConfig {
+        private Boolean enabled;        // Enable/disable this file format (default: true)
         private String timezone;
         private PdfTable pdfTable;
         private DateParse dateParse;

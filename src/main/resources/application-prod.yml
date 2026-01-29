@@ -13,9 +13,9 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
-      username: root
-      password: Alpha3034#
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:25060/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: doadmin
+      password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 10
@@ -30,9 +30,9 @@ spring:
     # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://34.180.14.173:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
-      username: root
-      password: Alpha3034#
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:25060/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      username: doadmin
+      password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
         connection-timeout: 30000
         maximum-pool-size: 20
@@ -94,10 +94,22 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 10MB      # Spring's max file size (must match our config)
+      max-request-size: 10MB   # Spring's max request size
       file-size-threshold: 0
       location: /tmp
+
+  # ============================================================================
+  # CUSTOM FILE UPLOAD CONFIGURATION (PRODUCTION)
+  # ============================================================================
+  file:
+    upload:
+      max-file-size-mb: 10       # Our application-level max file size in MB
+      allowed-extensions: # Allowed file extensions (with dot)
+        - .csv
+        - .xls
+        - .xlsx
+        - .pdf
 
   # ============================================================================
   # KAFKA CONFIGURATION (PRODUCTION)
@@ -110,7 +122,7 @@ spring:
     # Producer Configuration
     producer:
       # Serializers (SAME as dev)
-      key-serializer: org.apache.kafka.common.serialization.LongSerializer
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
       # Reliability settings (SAME as dev)
@@ -194,7 +206,7 @@ jwt:
 # ============================================================================
 security:
   ip-whitelist:
-    enabled: true      # Set to false to disable IP whitelist filtering
+    enabled: false      # Set to false to disable IP whitelist filtering
     debug: true        # Set to true to see detailed IP extraction logs (useful for debugging proxy issues)
 
 # ============================================================================
@@ -258,13 +270,27 @@ kafka:
 
   # Admin Configuration (for topic creation)
   admin:
-    auto-create: false  # PROD: false (manual topic creation for control)
+    auto-create: true  # PROD: false (manual topic creation for control)
     operation-timeout: 30000  # SAME as dev
 
 # ============================================================================
-# STATEMENT QUERY SERVICE CONFIGURATION (PRODUCTION)
+# STATEMENT UPLOAD PERFORMANCE AND QUERY SERVICE CONFIGURATION (PRODUCTION)
 # ============================================================================
 statement:
+  upload:
+    # PRODUCTION: Higher batch size for better throughput
+    batch-size: 200
+
+    # PRODUCTION: Enable parallel processing for large files
+    # Make sure database connection pool can handle this
+    enable-parallel-processing: true
+
+    # PRODUCTION: More threads for parallel processing
+    # BusinessHikariPool has maximumPoolSize=20, so 8 threads is safe
+    parallel-threads: 8
+
+    # PRODUCTION: Keep statistics logging enabled for monitoring
+    log-batch-statistics: true
   query:
     max-page-size: 100
     default-page-size: 20

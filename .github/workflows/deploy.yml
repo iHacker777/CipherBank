@@ -47,7 +47,7 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          *CipherBank Backend Deployment - Initiated*
+          ♨️ *CipherBank Backend Deployment - Initiated*
           
           *Deployment Information*
           Status: Pipeline Started
@@ -69,6 +69,8 @@ jobs:
           ⏳ Health verification
           
           [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ♨️ `Java - Springboot`
     
     - name: Set up JDK 17
       uses: actions/setup-java@387ac29b308b003ca37ba93a6cab5eb57c8f5f93  # v4.0.0
@@ -111,7 +113,7 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          *CipherBank Backend Deployment - Build Completed*
+          ♨️ *CipherBank Backend Deployment - Build Completed*
           
           *Build Information*
           Status: Build Successful
@@ -136,6 +138,8 @@ jobs:
           ⏳ Running health checks
           
           [View Build Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ♨️ `Java - Springboot`
     
     - name: Setup SSH
       run: |
@@ -498,7 +502,8 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          *CipherBank Backend Deployment - Upload Completed*
+          
+          ♨️ *CipherBank Backend Deployment - Upload Completed*
           
           *Upload Information*
           Status: Transfer Successful
@@ -530,6 +535,8 @@ jobs:
           ⏳ Traffic switching
           
           [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ♨️ `Java - Springboot`
     
     - name: Upload Docker Compose Configuration
       run: |
@@ -656,7 +663,7 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          *CipherBank Backend Deployment - Kafka Ready*
+          ♨️ *CipherBank Backend Deployment - Kafka Ready*
           
           *Kafka Status*
           Status: Running and Healthy
@@ -676,6 +683,8 @@ jobs:
           ⏳ Application health verification
           
           [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ♨️ `Java - Springboot`
     
     - name: Create Deployment Script
       run: |
@@ -1195,7 +1204,7 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          ✅ *CipherBank Backend Deployment - Completed Successfully*
+          ✅ ♨️ *CipherBank Backend Deployment - Completed Successfully*
           
           *Deployment Summary*
           Status: ✅ Production Deployment Successful
@@ -1228,6 +1237,8 @@ jobs:
           
           *Links*
           [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) • [View Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.details.outputs.sha_full }})
+          
+          ♨️ `Java - Springboot`
 
     
     - name: Send Telegram Notification - Failure
@@ -1239,7 +1250,7 @@ jobs:
         format: markdown
         disable_web_page_preview: true
         message: |
-          ❌ *CipherBank Backend Deployment - Failed*
+          ❌ ♨️ *CipherBank Backend Deployment - Failed*
           
           *Deployment Summary*
           Status: ❌ Production Deployment Failed
@@ -1282,6 +1293,8 @@ jobs:
           [View Deployment](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) • [View Commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.details.outputs.sha_full }})
           
           Investigation required before next deployment attempt.
+          
+          ♨️ `Java - Springboot`
     
     - name: Send CRITICAL System Down Alert
       if: failure() && steps.check_system_down.outputs.is_critical == 'true'
@@ -1371,4 +1384,6 @@ jobs:
           
           ☎️ *ESCALATE IF NEEDED*
           This is a P0 production incident requiring immediate response.
+          
+          ♨️ `Java - Springboot`
 
