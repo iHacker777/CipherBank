@@ -13,7 +13,7 @@ spring:
   datasource:
     security:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:3306/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:25060/paytrix_db?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: doadmin
       password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
@@ -30,7 +30,7 @@ spring:
     # Purpose: Business logic, payment processing
     business:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:3306/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
+      jdbc-url: jdbc:mysql://private-db-mysql-blr1-87014-do-user-31560217-0.l.db.ondigitalocean.com:25060/cipherbank?serverTimezone=UTC&allowPublicKeyRetrieval=true
       username: doadmin
       password: AVNS_XwRLneBUvulqG_Szb6K
       hikari:
