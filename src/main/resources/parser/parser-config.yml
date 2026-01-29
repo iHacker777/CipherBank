@@ -253,7 +253,7 @@ banks:
         mode: "search"
         search:
           useOneBasedRowIndex: true
-          fixedHeaderRows: { from: 29, to: 29 }  # Single row header at row 29
+          fixedHeaderRows: { from: 27, to: 27 }  # Single row header at row 29
           multiRowCount: 1                        # Single row header
           mergeSeparator: " "
           rowStartOffset: 1                       # Data starts one row after header (row 30)
